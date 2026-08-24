@@ -13,8 +13,8 @@ jobs:
 
     env:
       GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-      GITEE_OWNER: KwoYeung
-      GITEE_REPO: ScreenshotStitcher
+      GITEE_OWNER: ${{ vars.GITEE_OWNER }}
+      GITEE_REPO: ${{ vars.GITEE_REPO }}
       RELEASE_TAG: ${{ github.event.release.tag_name }}
       RELEASE_NAME: ${{ github.event.release.name }}
       RELEASE_BODY: ${{ github.event.release.body }}
