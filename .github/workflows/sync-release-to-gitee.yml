@@ -1,0 +1,104 @@
+name: Sync Release to Gitee
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  sync-release:
+    runs-on: ubuntu-latest
+
+    env:
+      GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+      GITEE_OWNER: KwoYeung
+      GITEE_REPO: ScreenshotStitcher
+      RELEASE_TAG: ${{ github.event.release.tag_name }}
+      RELEASE_NAME: ${{ github.event.release.name }}
+      RELEASE_BODY: ${{ github.event.release.body }}
+      RELEASE_PRERELEASE: ${{ github.event.release.prerelease }}
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Download GitHub Release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p release-assets
+
+          asset_count="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/releases/${{ github.event.release.id }}" \
+            --jq '.assets | length')"
+
+          if [ "$asset_count" -gt 0 ]; then
+            gh release download "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --dir release-assets
+          else
+            echo "This release has no uploaded assets."
+          fi
+
+      - name: Create or find Gitee Release
+        id: gitee_release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          api="https://gitee.com/api/v5/repos/${GITEE_OWNER}/${GITEE_REPO}"
+          encoded_tag="$(jq -rn --arg value "$RELEASE_TAG" '$value|@uri')"
+
+          status="$(curl -sS \
+            -o /tmp/gitee-release.json \
+            -w "%{http_code}" \
+            --get \
+            --data-urlencode "access_token=${GITEE_TOKEN}" \
+            "${api}/releases/tags/${encoded_tag}")"
+
+          if [ "$status" = "200" ]; then
+            echo "Gitee Release already exists."
+          elif [ "$status" = "404" ]; then
+            curl -fsS \
+              -X POST \
+              --form-string "access_token=${GITEE_TOKEN}" \
+              --form-string "tag_name=${RELEASE_TAG}" \
+              --form-string "name=${RELEASE_NAME:-$RELEASE_TAG}" \
+              --form-string "body=${RELEASE_BODY}" \
+              --form-string "target_commitish=${RELEASE_TAG}" \
+              --form-string "prerelease=${RELEASE_PRERELEASE}" \
+              "${api}/releases" \
+              > /tmp/gitee-release.json
+          else
+            cat /tmp/gitee-release.json
+            exit 1
+          fi
+
+          release_id="$(jq -r '.id' /tmp/gitee-release.json)"
+
+          if [ -z "$release_id" ] || [ "$release_id" = "null" ]; then
+            cat /tmp/gitee-release.json
+            exit 1
+          fi
+
+          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
+
+      - name: Upload assets to Gitee Release
+        shell: bash
+        env:
+          GITEE_RELEASE_ID: ${{ steps.gitee_release.outputs.release_id }}
+        run: |
+          set -euo pipefail
+
+          api="https://gitee.com/api/v5/repos/${GITEE_OWNER}/${GITEE_REPO}"
+
+          while IFS= read -r -d '' file; do
+            echo "Uploading: $(basename "$file")"
+
+            curl -fsS \
+              -X POST \
+              -F "access_token=${GITEE_TOKEN}" \
+              -F "file=@${file}" \
+              "${api}/releases/${GITEE_RELEASE_ID}/attach_files"
+          done < <(find release-assets -type f -print0)
