@@ -1,0 +1,11 @@
+.venv/
+.venv-build-windows/
+__pycache__/
+*.py[cod]
+.DS_Store
+build/
+dist/
+release/
+outputs/
+work_artifact/
+*.xlsx
