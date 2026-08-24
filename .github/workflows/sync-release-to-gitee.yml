@@ -57,27 +57,32 @@ jobs:
             --data-urlencode "access_token=${GITEE_TOKEN}" \
             "${api}/releases/tags/${encoded_tag}")"
 
+          release_id=""
           if [ "$status" = "200" ]; then
+            release_id="$(jq -r '.id // empty' /tmp/gitee-release.json)"
+          fi
+
+          if [ "$status" = "200" ] && [ -n "$release_id" ]; then
             echo "Gitee Release already exists."
-          elif [ "$status" = "404" ]; then
+          elif [ "$status" = "404" ] || { [ "$status" = "200" ] && [ -z "$release_id" ]; }; then
             curl -fsS \
               -X POST \
               --form-string "access_token=${GITEE_TOKEN}" \
               --form-string "tag_name=${RELEASE_TAG}" \
               --form-string "name=${RELEASE_NAME:-$RELEASE_TAG}" \
               --form-string "body=${RELEASE_BODY}" \
-              --form-string "target_commitish=${RELEASE_TAG}" \
+              --form-string "target_commitish=main" \
               --form-string "prerelease=${RELEASE_PRERELEASE}" \
               "${api}/releases" \
               > /tmp/gitee-release.json
+
+            release_id="$(jq -r '.id // empty' /tmp/gitee-release.json)"
           else
             cat /tmp/gitee-release.json
             exit 1
           fi
 
-          release_id="$(jq -r '.id' /tmp/gitee-release.json)"
-
-          if [ -z "$release_id" ] || [ "$release_id" = "null" ]; then
+          if [ -z "$release_id" ]; then
             cat /tmp/gitee-release.json
             exit 1
           fi
