@@ -85,6 +85,12 @@ ScreenshotStitcher 是一款本地运行的桌面截图拼接工具。它可以�
 - 问题现象和复现步骤。
 - 在不包含隐私内容的前提下，提供示例截图。
 
+## 开源许可
+
+本项目基于 [MIT License](LICENSE) 开源。你可以自由使用、修改和分发本项目，但需保留原始版权和许可声明。
+
+Copyright © 2026 KwoYeung.
+
 <details>
 <summary><strong>从源码运行与开发</strong></summary>
 
