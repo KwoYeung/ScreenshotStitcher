@@ -203,14 +203,30 @@ def match_pair_2d(
         if affine is not None and affine_mask is not None:
             inlier_mask = affine_mask.ravel().astype(bool)
             inlier_count = int(inlier_mask.sum())
-            inlier_points = points_a[inlier_mask]
-            span = float(np.linalg.norm(np.ptp(inlier_points, axis=0))) if inlier_count else 0.0
+            inlier_points_a = points_a[inlier_mask]
+            inlier_points_b = points_b[inlier_mask]
+            span_a = float(np.linalg.norm(np.ptp(inlier_points_a, axis=0))) if inlier_count else 0.0
+            span_b = float(np.linalg.norm(np.ptp(inlier_points_b, axis=0))) if inlier_count else 0.0
             estimated_scale = float(np.hypot(affine[0, 0], affine[1, 0]))
-            if (
+            enough_coverage = (
                 inlier_count >= 6
-                and span >= max(80.0, min(first.shape[:2]) * 0.18)
-                and abs(estimated_scale - 1.0) > options.max_scale_delta
-            ):
+                and span_a >= max(80.0, min(first.shape[:2]) * 0.18)
+                and span_b >= max(80.0, min(second.shape[:2]) * 0.18)
+            )
+            if enough_coverage and (not np.isfinite(estimated_scale) or not 0.25 <= estimated_scale <= 4.0):
+                return MosaicMatch(
+                    first_index,
+                    second_index,
+                    None,
+                    None,
+                    0.0,
+                    inlier_count,
+                    reason=(
+                        "检测到画布/内容比例异常，无法可靠估算缩放比；"
+                        "请统一缩放比后重试"
+                    ),
+                )
+            if enough_coverage and abs(estimated_scale - 1.0) > options.max_scale_delta:
                 return MosaicMatch(
                     first_index,
                     second_index,
@@ -225,7 +241,7 @@ def match_pair_2d(
                     ),
                 )
 
-    candidates: list[tuple[float, float, float]] = []
+    candidates: list[tuple[float, float, float, float, float, float, float]] = []
     min_side = max(36, options.min_overlap_px // 2)
     # Different crop sizes are valid as long as the images share enough real
     # content. Base the threshold on the smaller image so a large screenshot
@@ -240,7 +256,7 @@ def match_pair_2d(
             continue
         width, height = overlap[4], overlap[5]
         if width >= min_side and height >= min_side and width * height >= min_area:
-            candidates.append((dx, dy, best.distance))
+            candidates.append((dx, dy, best.distance, pa[0], pa[1], pb[0], pb[1]))
     if len(candidates) < 5:
         return MosaicMatch(first_index, second_index, None, None, 0.0, reason="未找到可靠的二维重叠")
 
@@ -267,6 +283,22 @@ def match_pair_2d(
         return MosaicMatch(first_index, second_index, None, None, 0.0, reason="匹配点的二维位移不一致")
 
     inlier_vectors = vectors[best_mask]
+    inlier_points_a = np.asarray([(item[3], item[4]) for item in candidates], dtype=np.float32)[best_mask]
+    inlier_points_b = np.asarray([(item[5], item[6]) for item in candidates], dtype=np.float32)[best_mask]
+    coverage_a = float(np.linalg.norm(np.ptp(inlier_points_a, axis=0)))
+    coverage_b = float(np.linalg.norm(np.ptp(inlier_points_b, axis=0)))
+    min_coverage_a = max(72.0, min(first.shape[:2]) * 0.15)
+    min_coverage_b = max(72.0, min(second.shape[:2]) * 0.15)
+    if coverage_a < min_coverage_a or coverage_b < min_coverage_b:
+        return MosaicMatch(
+            first_index,
+            second_index,
+            None,
+            None,
+            0.0,
+            len(inlier_vectors),
+            reason="匹配点过于集中，无法确认画布比例和位移一致",
+        )
     dx, dy = np.median(inlier_vectors, axis=0)
     dx_i, dy_i = int(round(float(dx))), int(round(float(dy)))
     similarity = _mosaic_similarity(a, b, dx_i, dy_i)
@@ -470,8 +502,9 @@ def stitch_mosaic(
 ) -> MosaicResult:
     """Arrange freely panned screenshots on a two-dimensional output canvas.
 
-    Capture order is retained. Each new image may attach to any earlier image,
-    so a serpentine scan or a return to a previous row is supported.
+    Capture order is strict: every image must overlap its immediate predecessor.
+    The first unreliable pair stops the operation instead of producing a
+    misleading partial canvas.
     """
     options = options or StitchOptions(min_confidence=0.34)
     if len(images) < 2:
@@ -484,33 +517,16 @@ def stitch_mosaic(
 
     for current in range(1, len(prepared)):
         notify(f"正在定位第 {current + 1}/{len(prepared)} 张…")
-        candidates = [
-            match_pair_2d(prepared[anchor], prepared[current], anchor, current, options)
-            for anchor in range(current)
-        ]
-        successful = [match for match in candidates if match.succeeded]
-        if successful:
-            best = max(successful, key=lambda match: match.confidence)
-            anchor_x, anchor_y = positions[best.first]
-            positions.append((anchor_x + best.offset_x, anchor_y + best.offset_y))  # type: ignore[operator]
-            matches.append(best)
-        else:
-            scale_failure = next((match for match in candidates if "缩放比不一致" in match.reason), None)
-            reason = (
-                scale_failure.reason
-                if scale_failure is not None
-                else max(candidates, key=lambda match: match.confidence).reason
-                if candidates
-                else "没有候选图片"
+        previous = current - 1
+        match = match_pair_2d(prepared[previous], prepared[current], previous, current, options)
+        if not match.succeeded:
+            raise ValueError(
+                f"自由平移拼接已在第 {previous + 1} → {current + 1} 张停止：{match.reason}。"
+                "请检查这两张的重叠内容和缩放比。"
             )
-            next_x = max(
-                x + prepared[index].shape[1]
-                for index, (x, _y) in enumerate(positions)
-            ) + 12
-            positions.append((next_x, 0))
-            failed = MosaicMatch(current - 1, current, None, None, 0.0, reason=reason)
-            matches.append(failed)
-            warnings.append(f"第 {current + 1} 张无法与已有画布可靠匹配，已完整放到画布右侧：{reason}")
+        anchor_x, anchor_y = positions[previous]
+        positions.append((anchor_x + match.offset_x, anchor_y + match.offset_y))  # type: ignore[operator]
+        matches.append(match)
 
     min_x = min(x for x, _ in positions)
     min_y = min(y for _, y in positions)

@@ -60,6 +60,10 @@ class StitchApp(tk.Tk):
 
         self.result: StitchResult | MosaicResult | None = None
         self.result_preview_photo: tk.PhotoImage | None = None
+        self.result_preview_scale = 1.0
+        self.result_preview_min_scale = 0.08
+        self.result_preview_max_scale = 4.0
+        self.result_zoom_text = tk.StringVar(value="滚轮缩放")
         self.input_preview_photo: tk.PhotoImage | None = None
         self.thumbnail_photos: list[tk.PhotoImage] = []
         self.thumbnail_meta: dict[str, tuple[int, int]] = {}
@@ -284,12 +288,18 @@ class StitchApp(tk.Tk):
         preview.rowconfigure(0, weight=1)
         preview.columnconfigure(0, weight=1)
         self.canvas = tk.Canvas(preview, background="#252525", highlightthickness=0)
+        self.canvas.bind("<MouseWheel>", self._zoom_result_preview)
+        self.canvas.bind("<Button-4>", lambda event: self._zoom_result_preview(event, 1))
+        self.canvas.bind("<Button-5>", lambda event: self._zoom_result_preview(event, -1))
         vertical = ttk.Scrollbar(preview, orient="vertical", command=self.canvas.yview)
         horizontal = ttk.Scrollbar(preview, orient="horizontal", command=self.canvas.xview)
         self.canvas.configure(yscrollcommand=vertical.set, xscrollcommand=horizontal.set)
         self.canvas.grid(row=0, column=0, sticky="nsew")
         vertical.grid(row=0, column=1, sticky="ns")
         horizontal.grid(row=1, column=0, sticky="ew")
+        ttk.Label(preview, textvariable=self.result_zoom_text, anchor="center").grid(
+            row=2, column=0, sticky="ew", pady=(6, 0)
+        )
         side = ttk.Frame(page, width=330)
         side.grid(row=0, column=1, sticky="nsew")
         side.grid_propagate(False)
@@ -965,13 +975,56 @@ class StitchApp(tk.Tk):
         self.update_idletasks()
         max_width = max(360, self.canvas.winfo_width() - 28)
         scale = min(1.0, max_width / result.image.shape[1])
-        shown = cv2.resize(result.image, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+        pixels = max(1, result.image.shape[0] * result.image.shape[1])
+        self.result_preview_scale = scale
+        self.result_preview_min_scale = max(0.01, min(0.08, scale * 0.5))
+        self.result_preview_max_scale = max(scale, min(4.0, (45_000_000 / pixels) ** 0.5))
+        self.canvas.xview_moveto(0)
+        self.canvas.yview_moveto(0)
+        self._render_result_preview(scale)
+
+    def _render_result_preview(self, scale: float) -> None:
+        if self.result is None:
+            return
+        source = self.result.image
+        width = max(1, round(source.shape[1] * scale))
+        height = max(1, round(source.shape[0] * scale))
+        interpolation = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR
+        shown = cv2.resize(source, (width, height), interpolation=interpolation)
         ok, encoded = cv2.imencode(".png", shown)
         if ok:
             self.result_preview_photo = tk.PhotoImage(data=base64.b64encode(encoded).decode("ascii"))
             self.canvas.delete("all")
             self.canvas.create_image(0, 0, image=self.result_preview_photo, anchor="nw")
             self.canvas.configure(scrollregion=(0, 0, shown.shape[1], shown.shape[0]))
+            self.result_preview_scale = scale
+            self.result_zoom_text.set(f"滚轮缩放：{scale:.0%}  ·  拖动滚动条查看画布")
+
+    def _zoom_result_preview(self, event: tk.Event, direction: int | None = None) -> str:
+        if self.result is None:
+            return "break"
+        if direction is None:
+            direction = 1 if getattr(event, "delta", 0) > 0 else -1
+        old_scale = self.result_preview_scale
+        factor = 1.15 if direction > 0 else 1 / 1.15
+        new_scale = float(
+            np.clip(old_scale * factor, self.result_preview_min_scale, self.result_preview_max_scale)
+        )
+        if abs(new_scale - old_scale) < 1e-6:
+            return "break"
+
+        # Keep the source point under the pointer stationary while zooming.
+        source_x = self.canvas.canvasx(event.x) / old_scale
+        source_y = self.canvas.canvasy(event.y) / old_scale
+        self._render_result_preview(new_scale)
+        self.canvas.update_idletasks()
+        shown_width = max(1, round(self.result.image.shape[1] * new_scale))
+        shown_height = max(1, round(self.result.image.shape[0] * new_scale))
+        target_x = source_x * new_scale - event.x
+        target_y = source_y * new_scale - event.y
+        self.canvas.xview_moveto(max(0.0, target_x / shown_width))
+        self.canvas.yview_moveto(max(0.0, target_y / shown_height))
+        return "break"
 
     def _save(self) -> None:
         if self.result is None:

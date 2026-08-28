@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 import cv2
 import numpy as np
@@ -91,6 +92,22 @@ class StitcherTests(unittest.TestCase):
         self.assertIn("缩放比不一致", match.reason)
         self.assertIn("115%", match.reason)
 
+    def test_invalid_scale_estimate_never_reports_zero_percent(self):
+        canvas = make_canvas()
+        first = canvas[0:500, 0:600]
+        second = canvas[240:740, 360:960]
+
+        def degenerate_affine(points_a, _points_b, **_kwargs):
+            matrix = np.zeros((2, 3), dtype=np.float64)
+            mask = np.ones((len(points_a), 1), dtype=np.uint8)
+            return matrix, mask
+
+        with patch("stitcher.cv2.estimateAffinePartial2D", side_effect=degenerate_affine):
+            match = match_pair_2d(first, second, options=self.options)
+        self.assertFalse(match.succeeded)
+        self.assertIn("比例异常", match.reason)
+        self.assertNotIn("0%", match.reason)
+
     def test_mosaic_supports_serpentine_capture(self):
         canvas = make_canvas()
         origins = [(0, 0), (390, 0), (390, 260), (0, 260)]
@@ -124,6 +141,22 @@ class StitcherTests(unittest.TestCase):
             self.assertAlmostEqual(actual[1], expected[1], delta=3)
         self.assertAlmostEqual(result.image.shape[1], 1080, delta=3)
         self.assertAlmostEqual(result.image.shape[0], 880, delta=3)
+
+    def test_mosaic_stops_at_first_scale_mismatch(self):
+        canvas = make_canvas(1450, 1100)
+        first = canvas[0:520, 0:640]
+        second = canvas[0:560, 380:1080]
+        third_source = canvas[280:880, 380:1030]
+        third = cv2.resize(third_source, None, fx=1.12, fy=1.12, interpolation=cv2.INTER_LINEAR)
+        with self.assertRaisesRegex(ValueError, "第 2 → 3 张停止.*缩放比不一致"):
+            stitch_mosaic([first, second, third], options=self.options)
+
+    def test_mosaic_stops_instead_of_placing_failure_on_right(self):
+        canvas = make_canvas()
+        first = canvas[0:500, 0:600]
+        blank = np.full((430, 710, 3), 255, np.uint8)
+        with self.assertRaisesRegex(ValueError, "第 1 → 2 张停止"):
+            stitch_mosaic([first, blank], options=self.options)
 
 
 if __name__ == "__main__":
