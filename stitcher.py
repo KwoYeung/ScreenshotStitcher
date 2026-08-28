@@ -19,6 +19,7 @@ class StitchOptions:
     side_margin_ratio: float = 0.035
     scrollbar_width_px: int = 18
     feature_count: int = 5000
+    max_scale_delta: float = 0.025
 
 
 @dataclass(slots=True)
@@ -176,18 +177,61 @@ def match_pair_2d(
         return MosaicMatch(first_index, second_index, None, None, 0.0, reason="可用图像特征太少")
 
     raw = cv2.BFMatcher(cv2.NORM_HAMMING).knnMatch(desc_a, desc_b, k=2)
+    ratio_matches: list[cv2.DMatch] = []
+    for pair in raw:
+        if len(pair) != 2:
+            continue
+        best, other = pair
+        if best.distance < 0.76 * other.distance:
+            ratio_matches.append(best)
+
+    # Estimate A -> B scale before enforcing a translation-only model. This
+    # catches screenshots taken after the viewer/browser zoom changed; merging
+    # those without resampling would bend text and geometry at the seam.
+    if len(ratio_matches) >= 8:
+        points_a = np.float32([key_a[item.queryIdx].pt for item in ratio_matches])
+        points_b = np.float32([key_b[item.trainIdx].pt for item in ratio_matches])
+        affine, affine_mask = cv2.estimateAffinePartial2D(
+            points_a,
+            points_b,
+            method=cv2.RANSAC,
+            ransacReprojThreshold=3.0,
+            maxIters=3000,
+            confidence=0.995,
+            refineIters=10,
+        )
+        if affine is not None and affine_mask is not None:
+            inlier_mask = affine_mask.ravel().astype(bool)
+            inlier_count = int(inlier_mask.sum())
+            inlier_points = points_a[inlier_mask]
+            span = float(np.linalg.norm(np.ptp(inlier_points, axis=0))) if inlier_count else 0.0
+            estimated_scale = float(np.hypot(affine[0, 0], affine[1, 0]))
+            if (
+                inlier_count >= 6
+                and span >= max(80.0, min(first.shape[:2]) * 0.18)
+                and abs(estimated_scale - 1.0) > options.max_scale_delta
+            ):
+                return MosaicMatch(
+                    first_index,
+                    second_index,
+                    None,
+                    None,
+                    0.0,
+                    inlier_count,
+                    reason=(
+                        "检测到画布/内容缩放比不一致："
+                        f"第 {second_index + 1} 张约为第 {first_index + 1} 张的 {estimated_scale:.0%}；"
+                        "请统一缩放比后重试"
+                    ),
+                )
+
     candidates: list[tuple[float, float, float]] = []
     min_side = max(36, options.min_overlap_px // 2)
     # Different crop sizes are valid as long as the images share enough real
     # content. Base the threshold on the smaller image so a large screenshot
     # does not unfairly reject an overlapping smaller one.
     min_area = min(first.shape[0] * first.shape[1], second.shape[0] * second.shape[1]) * 0.035
-    for pair in raw:
-        if len(pair) != 2:
-            continue
-        best, other = pair
-        if best.distance >= 0.76 * other.distance:
-            continue
+    for best in ratio_matches:
         pa = key_a[best.queryIdx].pt
         pb = key_b[best.trainIdx].pt
         dx, dy = pb[0] - pa[0], pb[1] - pa[1]
@@ -451,7 +495,14 @@ def stitch_mosaic(
             positions.append((anchor_x + best.offset_x, anchor_y + best.offset_y))  # type: ignore[operator]
             matches.append(best)
         else:
-            reason = max(candidates, key=lambda match: match.confidence).reason if candidates else "没有候选图片"
+            scale_failure = next((match for match in candidates if "缩放比不一致" in match.reason), None)
+            reason = (
+                scale_failure.reason
+                if scale_failure is not None
+                else max(candidates, key=lambda match: match.confidence).reason
+                if candidates
+                else "没有候选图片"
+            )
             next_x = max(
                 x + prepared[index].shape[1]
                 for index, (x, _y) in enumerate(positions)

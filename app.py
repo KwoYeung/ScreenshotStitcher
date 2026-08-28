@@ -91,6 +91,7 @@ class StitchApp(tk.Tk):
         self.hotkey_choice = tk.StringVar(value=default_hotkey())
         self.hotkey_status = tk.StringVar(value="")
         self.controller_text = tk.StringVar(value="📷 截图")
+        self.mode_hint = tk.StringVar(value="")
 
         self._build_ui()
         self._mode_changed()
@@ -244,6 +245,13 @@ class StitchApp(tk.Tk):
         )
         mode_box.pack(side="right")
         mode_box.bind("<<ComboboxSelected>>", self._mode_changed)
+        ttk.Label(
+            options,
+            textvariable=self.mode_hint,
+            foreground="#9a5a00",
+            wraplength=405,
+            justify="left",
+        ).pack(anchor="w", fill="x", pady=(7, 0))
         self.auto_sort_check = ttk.Checkbutton(
             options,
             text="根据内容自动排序",
@@ -876,12 +884,14 @@ class StitchApp(tk.Tk):
     def _mode_changed(self, _event: tk.Event | None = None) -> None:
         is_vertical = self.stitch_mode.get() == "纵向长图"
         if is_vertical:
+            self.mode_hint.set("提示：纵向截图建议保持相同宽度和内容缩放比。")
             self.auto_sort_check.pack(anchor="w", pady=(7, 0))
             if self.auto_sort.get():
                 self.order_row.pack_forget()
             else:
                 self.order_row.pack(fill="x", pady=(7, 0))
         else:
+            self.mode_hint.set("提示：图片宽高可以不同，但画布/内容缩放比需一致，避免拼接变形；程序会自动检测明显变化。")
             self.auto_sort_check.pack_forget()
             self.order_row.pack_forget()
         self.run_button.configure(text="开始纵向拼接" if is_vertical else "开始二维拼接")

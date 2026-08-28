@@ -81,6 +81,16 @@ class StitcherTests(unittest.TestCase):
         self.assertAlmostEqual(match.offset_x, 380, delta=3)
         self.assertAlmostEqual(match.offset_y, 220, delta=3)
 
+    def test_unrestricted_2d_match_rejects_changed_content_scale(self):
+        canvas = make_canvas(1450, 1100)
+        first = canvas[0:520, 0:640]
+        second_source = canvas[180:760, 330:1030]
+        second = cv2.resize(second_source, None, fx=1.15, fy=1.15, interpolation=cv2.INTER_LINEAR)
+        match = match_pair_2d(first, second, options=self.options)
+        self.assertFalse(match.succeeded)
+        self.assertIn("缩放比不一致", match.reason)
+        self.assertIn("115%", match.reason)
+
     def test_mosaic_supports_serpentine_capture(self):
         canvas = make_canvas()
         origins = [(0, 0), (390, 0), (390, 260), (0, 260)]
