@@ -149,14 +149,52 @@ class StitcherTests(unittest.TestCase):
         third_source = canvas[280:880, 380:1030]
         third = cv2.resize(third_source, None, fx=1.12, fy=1.12, interpolation=cv2.INTER_LINEAR)
         with self.assertRaisesRegex(ValueError, "第 2 → 3 张停止.*缩放比不一致"):
-            stitch_mosaic([first, second, third], options=self.options)
+            stitch_mosaic([first, second, third], options=self.options, strict_order=True)
 
     def test_mosaic_stops_instead_of_placing_failure_on_right(self):
         canvas = make_canvas()
         first = canvas[0:500, 0:600]
         blank = np.full((430, 710, 3), 255, np.uint8)
         with self.assertRaisesRegex(ValueError, "第 1 → 2 张停止"):
-            stitch_mosaic([first, blank], options=self.options)
+            stitch_mosaic([first, blank], options=self.options, strict_order=True)
+
+    def test_auto_tolerant_skips_middle_scale_outlier(self):
+        canvas = make_canvas(1450, 1100)
+        normal = [
+            canvas[0:520, 0:640],
+            canvas[0:560, 380:1080],
+            canvas[280:880, 380:1030],
+        ]
+        outlier_source = canvas[160:720, 220:900]
+        outlier = cv2.resize(outlier_source, None, fx=1.12, fy=1.12, interpolation=cv2.INTER_LINEAR)
+        result = stitch_mosaic([normal[0], outlier, normal[1], normal[2]], options=self.options)
+        self.assertIsNone(result.positions[1])
+        self.assertTrue(all(result.positions[index] is not None for index in (0, 2, 3)))
+        self.assertTrue(any("第 2 张已跳过" in warning for warning in result.warnings))
+
+    def test_auto_tolerant_can_skip_first_scaled_image(self):
+        canvas = make_canvas(1450, 1100)
+        outlier_source = canvas[120:680, 180:860]
+        outlier = cv2.resize(outlier_source, None, fx=1.10, fy=1.10, interpolation=cv2.INTER_LINEAR)
+        normal = [
+            canvas[0:520, 0:640],
+            canvas[0:560, 380:1080],
+            canvas[280:880, 380:1030],
+        ]
+        result = stitch_mosaic([outlier, *normal], options=self.options)
+        self.assertIsNone(result.positions[0])
+        self.assertTrue(all(result.positions[index] is not None for index in (1, 2, 3)))
+
+    def test_auto_tolerant_ignores_random_import_order(self):
+        canvas = make_canvas()
+        origins = [(390, 260), (0, 0), (0, 260), (390, 0)]
+        images = [canvas[y : y + 500, x : x + 600] for x, y in origins]
+        result = stitch_mosaic(images, options=self.options)
+        self.assertFalse(result.warnings)
+        for actual, expected in zip(result.positions, origins):
+            self.assertIsNotNone(actual)
+            self.assertAlmostEqual(actual[0], expected[0], delta=3)  # type: ignore[index]
+            self.assertAlmostEqual(actual[1], expected[1], delta=3)  # type: ignore[index]
 
 
 if __name__ == "__main__":

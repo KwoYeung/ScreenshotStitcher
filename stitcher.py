@@ -66,9 +66,16 @@ class MosaicMatch:
 @dataclass(slots=True)
 class MosaicResult:
     image: np.ndarray
-    positions: list[tuple[int, int]]
+    positions: list[tuple[int, int] | None]
     matches: list[MosaicMatch] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class _MosaicFeatures:
+    gray: np.ndarray
+    keypoints: list[cv2.KeyPoint]
+    descriptors: np.ndarray | None
 
 
 def read_image(path: str | Path) -> np.ndarray:
@@ -121,6 +128,13 @@ def _mosaic_gray(image: np.ndarray) -> np.ndarray:
     return cv2.createCLAHE(2.0, (8, 8)).apply(gray)
 
 
+def _mosaic_features(image: np.ndarray, options: StitchOptions) -> _MosaicFeatures:
+    gray = _mosaic_gray(image)
+    orb = cv2.ORB_create(nfeatures=options.feature_count, fastThreshold=8, edgeThreshold=12)
+    keypoints, descriptors = orb.detectAndCompute(gray, None)
+    return _MosaicFeatures(gray, keypoints, descriptors)
+
+
 def _overlap_rect(
     shape_a: tuple[int, ...],
     shape_b: tuple[int, ...],
@@ -165,14 +179,15 @@ def match_pair_2d(
     first_index: int = 0,
     second_index: int = 1,
     options: StitchOptions | None = None,
+    _first_features: _MosaicFeatures | None = None,
+    _second_features: _MosaicFeatures | None = None,
 ) -> MosaicMatch:
     """Estimate unrestricted X/Y placement between two overlapping viewports."""
     options = options or StitchOptions()
-    a = _mosaic_gray(first)
-    b = _mosaic_gray(second)
-    orb = cv2.ORB_create(nfeatures=options.feature_count, fastThreshold=8, edgeThreshold=12)
-    key_a, desc_a = orb.detectAndCompute(a, None)
-    key_b, desc_b = orb.detectAndCompute(b, None)
+    features_a = _first_features or _mosaic_features(first, options)
+    features_b = _second_features or _mosaic_features(second, options)
+    a, key_a, desc_a = features_a.gray, features_a.keypoints, features_a.descriptors
+    b, key_b, desc_b = features_b.gray, features_b.keypoints, features_b.descriptors
     if desc_a is None or desc_b is None or len(key_a) < 8 or len(key_b) < 8:
         return MosaicMatch(first_index, second_index, None, None, 0.0, reason="可用图像特征太少")
 
@@ -499,42 +514,165 @@ def stitch_mosaic(
     images: Sequence[np.ndarray],
     options: StitchOptions | None = None,
     progress: Callable[[str], None] | None = None,
+    strict_order: bool = False,
 ) -> MosaicResult:
     """Arrange freely panned screenshots on a two-dimensional output canvas.
 
-    Capture order is strict: every image must overlap its immediate predecessor.
-    The first unreliable pair stops the operation instead of producing a
-    misleading partial canvas.
+    Automatic mode builds a confidence graph and stitches the largest reliable
+    connected group, skipping explicit outliers. Strict mode requires every
+    image to overlap its immediate predecessor and stops at the first failure.
     """
     options = options or StitchOptions(min_confidence=0.34)
     if len(images) < 2:
         raise ValueError("请至少选择两张图片")
     prepared = [image.copy() for image in images]
     notify = progress or (lambda _: None)
-    positions: list[tuple[int, int]] = [(0, 0)]
+    notify("正在提取图片特征…")
+    features = [_mosaic_features(image, options) for image in prepared]
+    positions: list[tuple[int, int] | None] = [None] * len(prepared)
     matches: list[MosaicMatch] = []
     warnings: list[str] = []
 
-    for current in range(1, len(prepared)):
-        notify(f"正在定位第 {current + 1}/{len(prepared)} 张…")
-        previous = current - 1
-        match = match_pair_2d(prepared[previous], prepared[current], previous, current, options)
-        if not match.succeeded:
-            raise ValueError(
-                f"自由平移拼接已在第 {previous + 1} → {current + 1} 张停止：{match.reason}。"
-                "请检查这两张的重叠内容和缩放比。"
+    if strict_order:
+        positions[0] = (0, 0)
+        for current in range(1, len(prepared)):
+            notify(f"正在定位第 {current + 1}/{len(prepared)} 张…")
+            previous = current - 1
+            match = match_pair_2d(
+                prepared[previous],
+                prepared[current],
+                previous,
+                current,
+                options,
+                features[previous],
+                features[current],
             )
-        anchor_x, anchor_y = positions[previous]
-        positions.append((anchor_x + match.offset_x, anchor_y + match.offset_y))  # type: ignore[operator]
-        matches.append(match)
+            if not match.succeeded:
+                raise ValueError(
+                    f"自由平移拼接已在第 {previous + 1} → {current + 1} 张停止：{match.reason}。"
+                    "请检查这两张的重叠内容和缩放比。"
+                )
+            anchor_x, anchor_y = positions[previous]  # type: ignore[misc]
+            positions[current] = (anchor_x + match.offset_x, anchor_y + match.offset_y)  # type: ignore[operator]
+            matches.append(match)
+    else:
+        pair_matches: dict[tuple[int, int], MosaicMatch] = {}
+        total_pairs = len(prepared) * (len(prepared) - 1) // 2
+        pair_number = 0
+        for first_index in range(len(prepared) - 1):
+            for second_index in range(first_index + 1, len(prepared)):
+                pair_number += 1
+                notify(f"正在分析图片关系 {pair_number}/{total_pairs}…")
+                pair_matches[(first_index, second_index)] = match_pair_2d(
+                    prepared[first_index],
+                    prepared[second_index],
+                    first_index,
+                    second_index,
+                    options,
+                    features[first_index],
+                    features[second_index],
+                )
 
-    min_x = min(x for x, _ in positions)
-    min_y = min(y for _, y in positions)
-    max_x = max(x + image.shape[1] for image, (x, _y) in zip(prepared, positions))
-    max_y = max(y + image.shape[0] for image, (_x, y) in zip(prepared, positions))
+        successful_edges = [match for match in pair_matches.values() if match.succeeded]
+        parent = list(range(len(prepared)))
+
+        def find(node: int) -> int:
+            while parent[node] != node:
+                parent[node] = parent[parent[node]]
+                node = parent[node]
+            return node
+
+        def union(first_node: int, second_node: int) -> None:
+            first_root, second_root = find(first_node), find(second_node)
+            if first_root != second_root:
+                parent[second_root] = first_root
+
+        for match in successful_edges:
+            union(match.first, match.second)
+
+        components: dict[int, set[int]] = {}
+        for index in range(len(prepared)):
+            components.setdefault(find(index), set()).add(index)
+        largest_size = max(len(component) for component in components.values())
+        if largest_size < 2:
+            strongest_failure = max(pair_matches.values(), key=lambda match: match.confidence)
+            raise ValueError(
+                "所有图片都无法形成可靠的重叠关系："
+                f"{strongest_failure.reason}。请核实重叠区域和缩放比。"
+            )
+        largest_components = [component for component in components.values() if len(component) == largest_size]
+        if len(largest_components) > 1:
+            groups = "；".join(
+                "、".join(str(index + 1) for index in sorted(component))
+                for component in largest_components
+            )
+            raise ValueError(
+                f"检测到多个规模相同的独立图片组（{groups}），无法可靠判断主画布。"
+                "请补充过渡截图或移除比例不一致的图片。"
+            )
+
+        main_component = largest_components[0]
+        root = min(main_component)
+        positions[root] = (0, 0)
+        placed = {root}
+        component_edges = [
+            match
+            for match in successful_edges
+            if match.first in main_component and match.second in main_component
+        ]
+        while len(placed) < len(main_component):
+            connecting = [
+                match
+                for match in component_edges
+                if (match.first in placed) != (match.second in placed)
+            ]
+            if not connecting:
+                raise ValueError("主图片组的连接关系不完整，无法生成可靠画布")
+            best = max(connecting, key=lambda match: match.confidence)
+            if best.first in placed:
+                anchor, current = best.first, best.second
+                offset_x, offset_y = best.offset_x, best.offset_y
+            else:
+                anchor, current = best.second, best.first
+                offset_x, offset_y = -best.offset_x, -best.offset_y  # type: ignore[operator]
+            anchor_x, anchor_y = positions[anchor]  # type: ignore[misc]
+            positions[current] = (anchor_x + offset_x, anchor_y + offset_y)  # type: ignore[operator]
+            placed.add(current)
+            matches.append(best)
+
+        for skipped in sorted(set(range(len(prepared))) - main_component):
+            comparisons = [
+                pair_matches[(min(skipped, placed_index), max(skipped, placed_index))]
+                for placed_index in main_component
+            ]
+            scale_failure = next(
+                (
+                    match
+                    for match in comparisons
+                    if "缩放比" in match.reason or "比例异常" in match.reason
+                ),
+                None,
+            )
+            if scale_failure is not None:
+                reason = scale_failure.reason
+            else:
+                reason = max(comparisons, key=lambda match: match.confidence).reason
+            warnings.append(f"第 {skipped + 1} 张已跳过：{reason}")
+
+    placed_items = [
+        (index, position)
+        for index, position in enumerate(positions)
+        if position is not None
+    ]
+    min_x = min(position[0] for _index, position in placed_items)
+    min_y = min(position[1] for _index, position in placed_items)
+    max_x = max(position[0] + prepared[index].shape[1] for index, position in placed_items)
+    max_y = max(position[1] + prepared[index].shape[0] for index, position in placed_items)
     canvas = np.full((max_y - min_y, max_x - min_x, 3), 238, dtype=np.uint8)
     occupied = np.zeros(canvas.shape[:2], dtype=bool)
-    for image, (x, y) in zip(prepared, positions):
+    for index, position in placed_items:
+        image = prepared[index]
+        x, y = position
         image_h, image_w = image.shape[:2]
         left, top = x - min_x, y - min_y
         roi = canvas[top : top + image_h, left : left + image_w]
@@ -543,5 +681,8 @@ def stitch_mosaic(
         mask[:] = True
 
     notify("正在生成二维画布预览…")
-    shifted_positions = [(x - min_x, y - min_y) for x, y in positions]
+    shifted_positions = [
+        (position[0] - min_x, position[1] - min_y) if position is not None else None
+        for position in positions
+    ]
     return MosaicResult(canvas, shifted_positions, matches, warnings)

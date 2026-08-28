@@ -89,6 +89,7 @@ class StitchApp(tk.Tk):
         self.events: queue.Queue[tuple[str, object]] = queue.Queue()
         self.auto_sort = tk.BooleanVar(value=True)
         self.stitch_mode = tk.StringVar(value="自由平移画布")
+        self.mosaic_strategy = tk.StringVar(value="自动容错")
         self.region_status = tk.StringVar(value="固定区域：尚未设置")
         self.status = tk.StringVar(value="设置固定区域或添加已有图片")
         self.preview_info = tk.StringVar(value="选择左侧缩略图可查看单张大图")
@@ -256,6 +257,15 @@ class StitchApp(tk.Tk):
             wraplength=405,
             justify="left",
         ).pack(anchor="w", fill="x", pady=(7, 0))
+        self.mosaic_strategy_row = ttk.Frame(options)
+        ttk.Label(self.mosaic_strategy_row, text="自由平移策略").pack(side="left")
+        ttk.Combobox(
+            self.mosaic_strategy_row,
+            textvariable=self.mosaic_strategy,
+            values=("自动容错", "严格顺序"),
+            state="readonly",
+            width=12,
+        ).pack(side="right")
         self.auto_sort_check = ttk.Checkbutton(
             options,
             text="根据内容自动排序",
@@ -308,6 +318,16 @@ class StitchApp(tk.Tk):
         self.report.pack(fill="both", expand=True, pady=(6, 10))
         self.save_button = ttk.Button(side, text="保存拼接结果…", style="Accent.TButton", command=self._save, state="disabled")
         self.save_button.pack(fill="x")
+        ttk.Label(
+            side,
+            text=(
+                "预览发现缺漏？可返回“截图管理”补充、移除或替换图片后重新拼接，"
+                "无需清空当前列表。如出现未对齐，请优先核实画布/内容缩放比。"
+            ),
+            foreground="#9a5a00",
+            wraplength=310,
+            justify="left",
+        ).pack(fill="x", pady=(0, 8))
         ttk.Button(side, text="返回截图管理", command=lambda: self.notebook.select(self.capture_page)).pack(fill="x", pady=(6, 0))
         ttk.Button(side, text="清理本轮内容", command=self._remove_all).pack(fill="x", pady=(6, 0))
 
@@ -895,13 +915,15 @@ class StitchApp(tk.Tk):
         is_vertical = self.stitch_mode.get() == "纵向长图"
         if is_vertical:
             self.mode_hint.set("提示：纵向截图建议保持相同宽度和内容缩放比。")
+            self.mosaic_strategy_row.pack_forget()
             self.auto_sort_check.pack(anchor="w", pady=(7, 0))
             if self.auto_sort.get():
                 self.order_row.pack_forget()
             else:
                 self.order_row.pack(fill="x", pady=(7, 0))
         else:
-            self.mode_hint.set("提示：图片宽高可以不同，但画布/内容缩放比需一致，避免拼接变形；程序会自动检测明显变化。")
+            self.mode_hint.set("提示：图片宽高可以不同。自动容错会跳过少量异常图；如预览未对齐，请核实画布/内容缩放比。")
+            self.mosaic_strategy_row.pack(fill="x", pady=(7, 0))
             self.auto_sort_check.pack_forget()
             self.order_row.pack_forget()
         self.run_button.configure(text="开始纵向拼接" if is_vertical else "开始二维拼接")
@@ -915,16 +937,21 @@ class StitchApp(tk.Tk):
         self.status.set("正在读取图片…")
         threading.Thread(
             target=self._worker,
-            args=(self.paths.copy(), self.auto_sort.get(), self.stitch_mode.get()),
+            args=(
+                self.paths.copy(),
+                self.auto_sort.get(),
+                self.stitch_mode.get(),
+                self.mosaic_strategy.get(),
+            ),
             daemon=True,
         ).start()
 
-    def _worker(self, paths: list[str], auto_sort: bool, mode: str) -> None:
+    def _worker(self, paths: list[str], auto_sort: bool, mode: str, mosaic_strategy: str) -> None:
         try:
             images = [read_image(path) for path in paths]
             progress = lambda message: self.events.put(("status", message))
             result = (
-                stitch_mosaic(images, progress=progress)
+                stitch_mosaic(images, progress=progress, strict_order=mosaic_strategy == "严格顺序")
                 if mode == "自由平移画布"
                 else stitch_images(images, auto_sort, progress=progress)
             )
@@ -956,7 +983,12 @@ class StitchApp(tk.Tk):
         self.save_button.configure(state="normal")
         self.status.set(f"完成：{result.image.shape[1]} × {result.image.shape[0]} 像素；{len(result.warnings)} 个警告")
         if isinstance(result, MosaicResult):
-            lines = ["二维位置：" + "，".join(f"{i + 1}=({x}, {y})" for i, (x, y) in enumerate(result.positions))]
+            placed_positions = [
+                f"{i + 1}=({position[0]}, {position[1]})"
+                for i, position in enumerate(result.positions)
+                if position is not None
+            ]
+            lines = ["二维位置：" + "，".join(placed_positions)]
             for match in result.matches:
                 state = f"位移 ({match.offset_x}, {match.offset_y})" if match.succeeded else "匹配失败，完整保留"
                 lines.append(f"{match.first + 1} → {match.second + 1}：{match.confidence:.0%}，{state}")
