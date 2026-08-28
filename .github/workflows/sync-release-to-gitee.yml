@@ -9,6 +9,11 @@ on:
         description: "要重新同步的 Release 标签（留空则同步最新版）"
         required: false
         type: string
+      replace_existing:
+        description: "替换 Gitee 中已存在的同名附件（补传 EXE 时无需勾选）"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -130,6 +135,7 @@ jobs:
         shell: bash
         env:
           GITEE_RELEASE_ID: ${{ steps.gitee_release.outputs.release_id }}
+          REPLACE_EXISTING: ${{ inputs.replace_existing || false }}
         run: |
           set -euo pipefail
 
@@ -145,17 +151,32 @@ jobs:
           while IFS= read -r -d '' file; do
             filename="$(basename "$file")"
             echo "Synchronizing: ${filename}"
+            mapfile -t attachment_ids < <(
+              jq -r --arg name "$filename" '.[] | select(.name == $name) | .id' /tmp/gitee-assets.json
+            )
 
-            while IFS= read -r attachment_id; do
-              [ -n "$attachment_id" ] || continue
-              curl -fsS \
-                -X DELETE \
-                --get \
-                --data-urlencode "access_token=${GITEE_TOKEN}" \
-                "${api}/releases/${GITEE_RELEASE_ID}/attach_files/${attachment_id}"
-            done < <(jq -r --arg name "$filename" '.[] | select(.name == $name) | .id' /tmp/gitee-assets.json)
+            if [ "${#attachment_ids[@]}" -gt 0 ] && [ "$REPLACE_EXISTING" != "true" ]; then
+              echo "Already exists on Gitee, skipping: ${filename}"
+              continue
+            fi
 
-            curl -fsS \
+            if [ "$REPLACE_EXISTING" = "true" ]; then
+              for attachment_id in "${attachment_ids[@]}"; do
+                curl -fsS \
+                  -X DELETE \
+                  --get \
+                  --data-urlencode "access_token=${GITEE_TOKEN}" \
+                  "${api}/releases/${GITEE_RELEASE_ID}/attach_files/${attachment_id}"
+              done
+            fi
+
+            curl --fail --show-error --no-progress-meter \
+              --http1.1 \
+              --connect-timeout 30 \
+              --max-time 5400 \
+              --retry 3 \
+              --retry-all-errors \
+              --retry-delay 15 \
               -X POST \
               -F "access_token=${GITEE_TOKEN}" \
               -F "file=@${file}" \

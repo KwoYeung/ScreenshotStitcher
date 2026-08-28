@@ -33,6 +33,6 @@ PyInstaller 不支持从 macOS 交叉编译 Windows exe，因此 Windows 产物�
 
 1. 打开 GitHub 仓库的 **Actions** 页面。
 2. 选择 **Sync Release to Gitee**。
-3. 点击 **Run workflow**；标签留空时默认同步最新 Release。
+3. 点击 **Run workflow**；标签留空时默认同步最新 Release。补传 EXE 时不要勾选“替换已有附件”。
 
-工作流会重新读取 GitHub Release 的所有附件，并在 Gitee 的同一版本中补充或替换同名文件，无需重新创建 Release。
+工作流会重新读取 GitHub Release 的所有附件，并在 Gitee 的同一版本中补充缺少的文件，无需重新创建 Release。Gitee 已有的同名附件默认会跳过；只有在需要覆盖重新打包的同名文件时，才勾选“替换已有附件”。大附件遇到 Gitee `502/503/504` 等临时错误时会自动重试。
