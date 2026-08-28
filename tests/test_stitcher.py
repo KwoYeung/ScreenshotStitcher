@@ -72,6 +72,15 @@ class StitcherTests(unittest.TestCase):
         self.assertAlmostEqual(match.offset_x, 390, delta=3)
         self.assertAlmostEqual(match.offset_y, 260, delta=3)
 
+    def test_unrestricted_2d_match_supports_different_sizes(self):
+        canvas = make_canvas(1450, 1100)
+        first = canvas[0:520, 0:640]
+        second = canvas[220:800, 380:1100]
+        match = match_pair_2d(first, second, options=self.options)
+        self.assertTrue(match.succeeded, match.reason)
+        self.assertAlmostEqual(match.offset_x, 380, delta=3)
+        self.assertAlmostEqual(match.offset_y, 220, delta=3)
+
     def test_mosaic_supports_serpentine_capture(self):
         canvas = make_canvas()
         origins = [(0, 0), (390, 0), (390, 260), (0, 260)]
@@ -84,6 +93,27 @@ class StitcherTests(unittest.TestCase):
             self.assertAlmostEqual(actual[1], expected[1], delta=3)
         self.assertAlmostEqual(result.image.shape[1], 990, delta=3)
         self.assertAlmostEqual(result.image.shape[0], 760, delta=3)
+
+    def test_mosaic_supports_different_image_sizes(self):
+        canvas = make_canvas(1450, 1100)
+        origins_and_sizes = [
+            ((0, 0), (640, 520)),
+            ((380, 0), (700, 560)),
+            ((380, 280), (650, 600)),
+            ((0, 280), (600, 550)),
+        ]
+        images = [
+            canvas[y : y + height, x : x + width]
+            for ((x, y), (width, height)) in origins_and_sizes
+        ]
+        result = stitch_mosaic(images, options=self.options)
+        self.assertFalse(result.warnings)
+        expected_origins = [item[0] for item in origins_and_sizes]
+        for actual, expected in zip(result.positions, expected_origins):
+            self.assertAlmostEqual(actual[0], expected[0], delta=3)
+            self.assertAlmostEqual(actual[1], expected[1], delta=3)
+        self.assertAlmostEqual(result.image.shape[1], 1080, delta=3)
+        self.assertAlmostEqual(result.image.shape[0], 880, delta=3)
 
 
 if __name__ == "__main__":

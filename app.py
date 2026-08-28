@@ -41,7 +41,7 @@ from stitcher import MosaicResult, StitchResult, read_image, stitch_images, stit
 
 configure_process_dpi_awareness()
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 DEVELOPER_NAME = "KwoYeung"
 
 
@@ -97,7 +97,25 @@ class StitchApp(tk.Tk):
         self.global_hotkey = GlobalHotkey(self, lambda: self.events.put(("hotkey", None)))
         self._register_hotkey()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+        self._configure_macos_reopen()
         self.after(80, self._poll_events)
+
+    def _configure_macos_reopen(self) -> None:
+        """Restore the main Tk window when the macOS Dock icon is clicked."""
+        if sys.platform != "darwin":
+            return
+        try:
+            self.createcommand("tk::mac::ReopenApplication", self._reopen_from_dock)
+        except tk.TclError:
+            pass
+
+    def _reopen_from_dock(self) -> None:
+        if self.capture_in_progress:
+            self.after(250, self._reopen_from_dock)
+            return
+        if self.selectors:
+            self._selection_cancel()
+        self._restore_main_window()
 
     # ---------- Main pages ----------
 
@@ -743,7 +761,12 @@ class StitchApp(tk.Tk):
         self.capture_controller_native = None
 
     def _restore_main_window(self) -> None:
+        try:
+            self.state("normal")
+        except tk.TclError:
+            self.deiconify()
         self.deiconify()
+        self.update_idletasks()
         self.notebook.select(self.capture_page)
         self.lift()
         self.focus_force()

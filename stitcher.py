@@ -178,7 +178,10 @@ def match_pair_2d(
     raw = cv2.BFMatcher(cv2.NORM_HAMMING).knnMatch(desc_a, desc_b, k=2)
     candidates: list[tuple[float, float, float]] = []
     min_side = max(36, options.min_overlap_px // 2)
-    min_area = first.shape[0] * first.shape[1] * 0.035
+    # Different crop sizes are valid as long as the images share enough real
+    # content. Base the threshold on the smaller image so a large screenshot
+    # does not unfairly reject an overlapping smaller one.
+    min_area = min(first.shape[0] * first.shape[1], second.shape[0] * second.shape[1]) * 0.035
     for pair in raw:
         if len(pair) != 2:
             continue
@@ -429,26 +432,16 @@ def stitch_mosaic(
     options = options or StitchOptions(min_confidence=0.34)
     if len(images) < 2:
         raise ValueError("请至少选择两张图片")
-    heights = np.asarray([image.shape[0] for image in images])
-    widths = np.asarray([image.shape[1] for image in images])
-    target_h, target_w = int(np.median(heights)), int(np.median(widths))
-    if np.max(np.abs(widths - target_w) / target_w) > 0.03 or np.max(np.abs(heights - target_h) / target_h) > 0.03:
-        raise ValueError("自由平移模式要求所有截图尺寸一致；请使用固定取景框重新截图")
-    normalised = [
-        image.copy()
-        if image.shape[:2] == (target_h, target_w)
-        else cv2.resize(image, (target_w, target_h), interpolation=cv2.INTER_AREA)
-        for image in images
-    ]
+    prepared = [image.copy() for image in images]
     notify = progress or (lambda _: None)
     positions: list[tuple[int, int]] = [(0, 0)]
     matches: list[MosaicMatch] = []
     warnings: list[str] = []
 
-    for current in range(1, len(normalised)):
-        notify(f"正在定位第 {current + 1}/{len(normalised)} 张…")
+    for current in range(1, len(prepared)):
+        notify(f"正在定位第 {current + 1}/{len(prepared)} 张…")
         candidates = [
-            match_pair_2d(normalised[anchor], normalised[current], anchor, current, options)
+            match_pair_2d(prepared[anchor], prepared[current], anchor, current, options)
             for anchor in range(current)
         ]
         successful = [match for match in candidates if match.succeeded]
@@ -459,7 +452,10 @@ def stitch_mosaic(
             matches.append(best)
         else:
             reason = max(candidates, key=lambda match: match.confidence).reason if candidates else "没有候选图片"
-            next_x = max(x + target_w for (x, _y) in positions) + 12
+            next_x = max(
+                x + prepared[index].shape[1]
+                for index, (x, _y) in enumerate(positions)
+            ) + 12
             positions.append((next_x, 0))
             failed = MosaicMatch(current - 1, current, None, None, 0.0, reason=reason)
             matches.append(failed)
@@ -467,14 +463,15 @@ def stitch_mosaic(
 
     min_x = min(x for x, _ in positions)
     min_y = min(y for _, y in positions)
-    max_x = max(x + target_w for x, _ in positions)
-    max_y = max(y + target_h for _, y in positions)
+    max_x = max(x + image.shape[1] for image, (x, _y) in zip(prepared, positions))
+    max_y = max(y + image.shape[0] for image, (_x, y) in zip(prepared, positions))
     canvas = np.full((max_y - min_y, max_x - min_x, 3), 238, dtype=np.uint8)
     occupied = np.zeros(canvas.shape[:2], dtype=bool)
-    for image, (x, y) in zip(normalised, positions):
+    for image, (x, y) in zip(prepared, positions):
+        image_h, image_w = image.shape[:2]
         left, top = x - min_x, y - min_y
-        roi = canvas[top : top + target_h, left : left + target_w]
-        mask = occupied[top : top + target_h, left : left + target_w]
+        roi = canvas[top : top + image_h, left : left + image_w]
+        mask = occupied[top : top + image_h, left : left + image_w]
         roi[~mask] = image[~mask]
         mask[:] = True
 

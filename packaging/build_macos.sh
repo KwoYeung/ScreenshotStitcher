@@ -8,8 +8,9 @@ BUILD_DIR="$PROJECT_ROOT/build/macos"
 DIST_DIR="$PROJECT_ROOT/dist/macos"
 RELEASE_DIR="$PROJECT_ROOT/release/macos"
 APP_NAME="截图自动拼接.app"
+APP_VERSION="1.1.0"
 ARCH="$(uname -m)"
-DMG_PATH="$RELEASE_DIR/截图自动拼接-macOS-$ARCH.dmg"
+DMG_PATH="$RELEASE_DIR/ScreenshotStitcher-v$APP_VERSION-macOS-$ARCH.dmg"
 
 if [ ! -x "$PYTHON_BIN" ]; then
   echo "未找到构建用 Python：$PYTHON_BIN"
