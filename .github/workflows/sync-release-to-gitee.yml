@@ -3,6 +3,12 @@ name: Sync Release to Gitee
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "要重新同步的 Release 标签（留空则同步最新版）"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -15,22 +21,48 @@ jobs:
       GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
       GITEE_OWNER: ${{ vars.GITEE_OWNER }}
       GITEE_REPO: ${{ vars.GITEE_REPO }}
-      RELEASE_TAG: ${{ github.event.release.tag_name }}
-      RELEASE_NAME: ${{ github.event.release.name }}
-      RELEASE_BODY: ${{ github.event.release.body }}
-      RELEASE_PRERELEASE: ${{ github.event.release.prerelease }}
       GH_TOKEN: ${{ github.token }}
 
     steps:
+      - name: Resolve GitHub Release
+        id: github_release
+        shell: bash
+        env:
+          EVENT_RELEASE_TAG: ${{ github.event.release.tag_name }}
+          MANUAL_RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          requested_tag="${EVENT_RELEASE_TAG:-${MANUAL_RELEASE_TAG:-}}"
+          if [ -z "$requested_tag" ]; then
+            gh api "repos/${GITHUB_REPOSITORY}/releases/latest" > /tmp/github-release.json
+          else
+            encoded_tag="$(jq -rn --arg value "$requested_tag" '$value|@uri')"
+            gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${encoded_tag}" > /tmp/github-release.json
+          fi
+
+          release_id="$(jq -r '.id // empty' /tmp/github-release.json)"
+          release_tag="$(jq -r '.tag_name // empty' /tmp/github-release.json)"
+          if [ -z "$release_id" ] || [ -z "$release_tag" ]; then
+            cat /tmp/github-release.json
+            exit 1
+          fi
+
+          echo "id=$release_id" >> "$GITHUB_OUTPUT"
+          echo "tag=$release_tag" >> "$GITHUB_OUTPUT"
+
       - name: Download GitHub Release assets
         shell: bash
+        env:
+          RELEASE_ID: ${{ steps.github_release.outputs.id }}
+          RELEASE_TAG: ${{ steps.github_release.outputs.tag }}
         run: |
           set -euo pipefail
 
           mkdir -p release-assets
 
           asset_count="$(gh api \
-            "repos/${GITHUB_REPOSITORY}/releases/${{ github.event.release.id }}" \
+            "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
             --jq '.assets | length')"
 
           if [ "$asset_count" -gt 0 ]; then
@@ -44,11 +76,16 @@ jobs:
       - name: Create or find Gitee Release
         id: gitee_release
         shell: bash
+        env:
+          RELEASE_TAG: ${{ steps.github_release.outputs.tag }}
         run: |
           set -euo pipefail
 
           api="https://gitee.com/api/v5/repos/${GITEE_OWNER}/${GITEE_REPO}"
           encoded_tag="$(jq -rn --arg value "$RELEASE_TAG" '$value|@uri')"
+          release_name="$(jq -r '.name // .tag_name' /tmp/github-release.json)"
+          release_body="$(jq -r '.body // ""' /tmp/github-release.json)"
+          release_prerelease="$(jq -r '.prerelease // false' /tmp/github-release.json)"
 
           status="$(curl -sS \
             -o /tmp/gitee-release.json \
@@ -69,10 +106,10 @@ jobs:
               -X POST \
               --form-string "access_token=${GITEE_TOKEN}" \
               --form-string "tag_name=${RELEASE_TAG}" \
-              --form-string "name=${RELEASE_NAME:-$RELEASE_TAG}" \
-              --form-string "body=${RELEASE_BODY}" \
+              --form-string "name=${release_name:-$RELEASE_TAG}" \
+              --form-string "body=${release_body}" \
               --form-string "target_commitish=main" \
-              --form-string "prerelease=${RELEASE_PRERELEASE}" \
+              --form-string "prerelease=${release_prerelease}" \
               "${api}/releases" \
               > /tmp/gitee-release.json
 
@@ -89,7 +126,7 @@ jobs:
 
           echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
 
-      - name: Upload assets to Gitee Release
+      - name: Replace Gitee Release assets
         shell: bash
         env:
           GITEE_RELEASE_ID: ${{ steps.gitee_release.outputs.release_id }}
@@ -97,9 +134,26 @@ jobs:
           set -euo pipefail
 
           api="https://gitee.com/api/v5/repos/${GITEE_OWNER}/${GITEE_REPO}"
+          curl -fsS \
+            --get \
+            --data-urlencode "access_token=${GITEE_TOKEN}" \
+            --data-urlencode "page=1" \
+            --data-urlencode "per_page=100" \
+            "${api}/releases/${GITEE_RELEASE_ID}/attach_files" \
+            > /tmp/gitee-assets.json
 
           while IFS= read -r -d '' file; do
-            echo "Uploading: $(basename "$file")"
+            filename="$(basename "$file")"
+            echo "Synchronizing: ${filename}"
+
+            while IFS= read -r attachment_id; do
+              [ -n "$attachment_id" ] || continue
+              curl -fsS \
+                -X DELETE \
+                --get \
+                --data-urlencode "access_token=${GITEE_TOKEN}" \
+                "${api}/releases/${GITEE_RELEASE_ID}/attach_files/${attachment_id}"
+            done < <(jq -r --arg name "$filename" '.[] | select(.name == $name) | .id' /tmp/gitee-assets.json)
 
             curl -fsS \
               -X POST \

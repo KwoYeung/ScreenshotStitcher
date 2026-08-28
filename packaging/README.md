@@ -26,3 +26,13 @@ packaging\build_windows.bat
 脚本会创建独立的 `.venv-build-windows` 构建环境，产物为 `release\windows\ScreenshotStitcher.exe`。exe 中包含 Python、OpenCV、NumPy 和 Pillow，最终用户无需安装 Python。
 
 PyInstaller 不支持从 macOS 交叉编译 Windows exe，因此 Windows 产物必须在 Windows 上构建和验证。
+
+## Windows 附件补同步到 Gitee
+
+如果 macOS DMG 已经先发布，Windows 打包完成后只需把 EXE 上传到同一个 GitHub Release，然后：
+
+1. 打开 GitHub 仓库的 **Actions** 页面。
+2. 选择 **Sync Release to Gitee**。
+3. 点击 **Run workflow**；标签留空时默认同步最新 Release。
+
+工作流会重新读取 GitHub Release 的所有附件，并在 Gitee 的同一版本中补充或替换同名文件，无需重新创建 Release。
