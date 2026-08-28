@@ -90,6 +90,7 @@ class StitchApp(tk.Tk):
         self.auto_sort = tk.BooleanVar(value=True)
         self.stitch_mode = tk.StringVar(value="自由平移画布")
         self.mosaic_strategy = tk.StringVar(value="自动容错")
+        self.mosaic_strategy_hint = tk.StringVar()
         self.region_status = tk.StringVar(value="固定区域：尚未设置")
         self.status = tk.StringVar(value="设置固定区域或添加已有图片")
         self.preview_info = tk.StringVar(value="选择左侧缩略图可查看单张大图")
@@ -259,13 +260,22 @@ class StitchApp(tk.Tk):
         ).pack(anchor="w", fill="x", pady=(7, 0))
         self.mosaic_strategy_row = ttk.Frame(options)
         ttk.Label(self.mosaic_strategy_row, text="自由平移策略").pack(side="left")
-        ttk.Combobox(
+        mosaic_strategy_box = ttk.Combobox(
             self.mosaic_strategy_row,
             textvariable=self.mosaic_strategy,
             values=("自动容错", "严格顺序"),
             state="readonly",
             width=12,
-        ).pack(side="right")
+        )
+        mosaic_strategy_box.pack(side="right")
+        mosaic_strategy_box.bind("<<ComboboxSelected>>", self._strategy_changed)
+        self.mosaic_strategy_hint_label = ttk.Label(
+            options,
+            textvariable=self.mosaic_strategy_hint,
+            foreground="#666666",
+            wraplength=405,
+            justify="left",
+        )
         self.auto_sort_check = ttk.Checkbutton(
             options,
             text="根据内容自动排序",
@@ -321,11 +331,12 @@ class StitchApp(tk.Tk):
         ttk.Label(
             side,
             text=(
-                "预览发现缺漏？可返回“截图管理”补充、移除或替换图片后重新拼接，"
-                "无需清空当前列表。如出现未对齐，请优先核实画布/内容缩放比。"
+                "预览发现缺漏？\n"
+                "可返回“截图管理”补充、移除或替换图片。\n"
+                "然后直接重新拼接，无需清空列表。\n"
+                "出现未对齐时，请核实画布／内容缩放比例。"
             ),
             foreground="#9a5a00",
-            wraplength=310,
             justify="left",
         ).pack(fill="x", pady=(0, 8))
         ttk.Button(side, text="返回截图管理", command=lambda: self.notebook.select(self.capture_page)).pack(fill="x", pady=(6, 0))
@@ -916,17 +927,30 @@ class StitchApp(tk.Tk):
         if is_vertical:
             self.mode_hint.set("提示：纵向截图建议保持相同宽度和内容缩放比。")
             self.mosaic_strategy_row.pack_forget()
+            self.mosaic_strategy_hint_label.pack_forget()
             self.auto_sort_check.pack(anchor="w", pady=(7, 0))
             if self.auto_sort.get():
                 self.order_row.pack_forget()
             else:
                 self.order_row.pack(fill="x", pady=(7, 0))
         else:
-            self.mode_hint.set("提示：图片宽高可以不同。自动容错会跳过少量异常图；如预览未对齐，请核实画布/内容缩放比。")
+            self.mode_hint.set("提示：图片宽高可以不同，但画布／内容缩放比建议保持一致。")
             self.mosaic_strategy_row.pack(fill="x", pady=(7, 0))
+            self._strategy_changed()
+            self.mosaic_strategy_hint_label.pack(anchor="w", fill="x", pady=(5, 0))
             self.auto_sort_check.pack_forget()
             self.order_row.pack_forget()
         self.run_button.configure(text="开始纵向拼接" if is_vertical else "开始二维拼接")
+
+    def _strategy_changed(self, _event: tk.Event | None = None) -> None:
+        if self.mosaic_strategy.get() == "严格顺序":
+            self.mosaic_strategy_hint.set(
+                "严格顺序：按列表顺序逐张拼接，相邻图片一旦匹配失败就停止，适合逐张排查。"
+            )
+        else:
+            self.mosaic_strategy_hint.set(
+                "自动容错（推荐）：按内容寻找能连接的主要图片组，不依赖导入顺序，并跳过少量异常图。"
+            )
 
     def _start(self) -> None:
         if len(self.paths) < 2:
