@@ -11,6 +11,7 @@ import threading
 import time
 import tkinter as tk
 import uuid
+import webbrowser
 from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
@@ -37,6 +38,7 @@ from screen_capture import (
     show_native_overlay,
 )
 from stitcher import MosaicResult, StitchResult, read_image, stitch_images, stitch_mosaic, write_image
+from update_checker import ReleaseInfo, check_latest_release, is_newer_version
 
 
 configure_process_dpi_awareness()
@@ -91,6 +93,8 @@ class StitchApp(tk.Tk):
         self.stitch_mode = tk.StringVar(value="自由平移画布")
         self.mosaic_strategy = tk.StringVar(value="自动容错")
         self.mosaic_strategy_hint = tk.StringVar()
+        self.version_status = tk.StringVar(value=f"v{APP_VERSION}")
+        self.update_release_url: str | None = None
         self.region_status = tk.StringVar(value="固定区域：尚未设置")
         self.status = tk.StringVar(value="设置固定区域或添加已有图片")
         self.preview_info = tk.StringVar(value="选择左侧缩略图可查看单张大图")
@@ -106,6 +110,7 @@ class StitchApp(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self._configure_macos_reopen()
         self.after(80, self._poll_events)
+        self.after(1200, self._start_update_check)
 
     def _configure_macos_reopen(self) -> None:
         """Restore the main Tk window when the macOS Dock icon is clicked."""
@@ -149,6 +154,18 @@ class StitchApp(tk.Tk):
         self._build_result_page()
         footer = ttk.Frame(root)
         footer.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+        self.version_label = tk.Label(
+            footer,
+            textvariable=self.version_status,
+            foreground="#6e6e73",
+            cursor="arrow",
+            borderwidth=0,
+            padx=0,
+            pady=0,
+        )
+        self.version_label.pack(side="left")
+        self.version_label.bind("<Button-1>", self._open_update_release)
+        ttk.Separator(footer, orient="vertical").pack(side="left", fill="y", padx=9)
         ttk.Label(footer, textvariable=self.status, anchor="w").pack(side="left", fill="x", expand=True)
         ttk.Label(footer, text=f"© 2026 {DEVELOPER_NAME}", foreground="#6e6e73").pack(side="right", padx=(12, 0))
 
@@ -160,6 +177,23 @@ class StitchApp(tk.Tk):
             "Copyright © 2026 KwoYeung\n\n"
             "开源图片拼接工具",
         )
+
+    def _start_update_check(self) -> None:
+        threading.Thread(target=self._check_for_update, daemon=True).start()
+
+    def _check_for_update(self) -> None:
+        release = check_latest_release()
+        if release is not None and is_newer_version(release.version, APP_VERSION):
+            self.events.put(("update_available", release))
+
+    def _show_update_available(self, release: ReleaseInfo) -> None:
+        self.update_release_url = release.url
+        self.version_status.set(f"v{APP_VERSION}  ·  发现新版本 v{release.version}")
+        self.version_label.configure(foreground="#b05a00", cursor="hand2")
+
+    def _open_update_release(self, _event: tk.Event | None = None) -> None:
+        if self.update_release_url:
+            webbrowser.open(self.update_release_url)
 
     def _build_capture_page(self) -> None:
         page = self.capture_page
@@ -991,6 +1025,8 @@ class StitchApp(tk.Tk):
                     self.status.set(str(payload))
                 elif kind == "hotkey":
                     self._hotkey_capture()
+                elif kind == "update_available":
+                    self._show_update_available(payload)  # type: ignore[arg-type]
                 elif kind == "error":
                     self.run_button.configure(state="normal")
                     self.status.set("拼接失败")
