@@ -15,6 +15,7 @@ from screen_capture import (
     capture_region_to_file,
     frame_pieces,
     open_screen_capture_settings,
+    register_screen_capture_permission,
     request_screen_capture_permission,
     reset_screen_capture_permission,
     screen_capture_permission_granted,
@@ -78,6 +79,16 @@ class ScreenCaptureTests(unittest.TestCase):
             command,
             ["/usr/bin/tccutil", "reset", "ScreenCapture", MACOS_BUNDLE_IDENTIFIER],
         )
+
+    def test_registration_uses_real_macos_screenshot_path(self):
+        completed = screen_capture.subprocess.CompletedProcess([], 1)
+        with (
+            patch.object(screen_capture.sys, "platform", "darwin"),
+            patch.object(screen_capture.subprocess, "run", return_value=completed) as run,
+            patch.object(screen_capture, "screen_capture_permission_granted", return_value=False),
+        ):
+            self.assertFalse(register_screen_capture_permission())
+        self.assertEqual(run.call_args.args[0][0], "/usr/sbin/screencapture")
 
     def test_open_macos_permission_settings(self):
         with (

@@ -36,7 +36,7 @@ from screen_capture import (
     frame_pieces,
     open_screen_capture_settings,
     place_windows_window,
-    request_screen_capture_permission,
+    register_screen_capture_permission,
     reset_screen_capture_permission,
     screen_capture_permission_granted,
     show_native_overlay,
@@ -573,34 +573,80 @@ class StitchApp(tk.Tk):
                 f"无法重置本软件的录屏权限。\n\n{detail}",
             )
             return
-        request_screen_capture_permission()
-        open_screen_capture_settings()
         messagebox.showinfo(
-            "请重新授权",
+            "旧授权已清除",
             "旧的录屏授权已清除。\n\n"
-            "1. 在已打开的“录屏与系统录音”中开启“截图自动拼接”。\n"
-            "2. 如果系统要求退出，请允许退出。\n"
-            "3. 然后从“应用程序”目录重新打开软件。\n\n"
+            "软件将先退出，此时系统设置中暂时没有本应用是正常的。\n\n"
+            "1. 从“应用程序”目录重新打开软件。\n"
+            "2. 再点击一次截图，macOS 会重新登记当前版本。\n"
+            "3. 按新的系统提示开启权限，然后完全退出并重开。\n\n"
             "点击“好”后本软件将退出。",
         )
         self._on_close()
 
+    def _capture_permission_action(self) -> str:
+        dialog = tk.Toplevel(self)
+        dialog.title("macOS 截图权限")
+        dialog.resizable(False, False)
+        dialog.transient(self)
+        dialog.grab_set()
+        result = tk.StringVar(value="cancel")
+
+        content = ttk.Frame(dialog, padding=18)
+        content.pack(fill="both", expand=True)
+        ttk.Label(
+            content,
+            text="截图权限仍未生效",
+            font=("TkDefaultFont", 14, "bold"),
+        ).pack(anchor="w")
+        ttk.Label(
+            content,
+            text=(
+                "首次使用，或当前开关尚未开启：请选“打开系统设置”。\n"
+                "如果开关已经开启，但更新后仍提示无权限：请选“重置旧授权”。"
+            ),
+            foreground="#555555",
+            justify="left",
+            wraplength=470,
+        ).pack(anchor="w", pady=(9, 16))
+        buttons = ttk.Frame(content)
+        buttons.pack(fill="x")
+
+        def choose(value: str) -> None:
+            result.set(value)
+            dialog.destroy()
+
+        ttk.Button(buttons, text="取消", command=lambda: choose("cancel")).pack(side="right")
+        ttk.Button(buttons, text="重置旧授权", command=lambda: choose("reset")).pack(
+            side="right", padx=(0, 7)
+        )
+        ttk.Button(buttons, text="打开系统设置", command=lambda: choose("settings")).pack(
+            side="right", padx=(0, 7)
+        )
+        dialog.protocol("WM_DELETE_WINDOW", lambda: choose("cancel"))
+        dialog.update_idletasks()
+        x = self.winfo_rootx() + max(0, (self.winfo_width() - dialog.winfo_reqwidth()) // 2)
+        y = self.winfo_rooty() + max(0, (self.winfo_height() - dialog.winfo_reqheight()) // 2)
+        dialog.geometry(f"+{x}+{y}")
+        self.wait_window(dialog)
+        return result.get()
+
     def _ensure_capture_permission(self) -> bool:
         if sys.platform != "darwin" or screen_capture_permission_granted():
             return True
-        if request_screen_capture_permission() or screen_capture_permission_granted():
+        if register_screen_capture_permission():
             return True
         self.status.set("截图权限未生效")
-        if messagebox.askyesno(
-            "截图权限未生效",
-            "macOS 仍未将录屏权限授予当前版本。\n\n"
-            "如果系统设置中的开关已经打开，通常是旧版本授权记录失效。"
-            "是否立即修复？",
-            icon="warning",
-        ):
+        action = self._capture_permission_action()
+        if action == "reset":
             self._repair_capture_permission()
-        else:
+        elif action == "settings":
             open_screen_capture_settings()
+            messagebox.showinfo(
+                "请完成授权",
+                "请在“录屏与系统录音”中开启“截图自动拼接”。\n\n"
+                "开启后请用 Command + Q 完全退出本软件，再从“应用程序”重新打开。",
+            )
         return False
 
     def _clear_fixed_region(self) -> None:

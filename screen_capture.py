@@ -86,6 +86,25 @@ def request_screen_capture_permission() -> bool:
         return False
 
 
+def register_screen_capture_permission() -> bool:
+    """Trigger macOS' real screenshot path so the app appears in Settings."""
+    if sys.platform != "darwin":
+        return True
+    probe = Path("/tmp") / f"screenshotstitcher-permission-{id(object())}.png"
+    try:
+        subprocess.run(
+            ["/usr/sbin/screencapture", "-x", "-R0,0,1,1", str(probe)],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except OSError:
+        return False
+    finally:
+        probe.unlink(missing_ok=True)
+    return screen_capture_permission_granted()
+
+
 def reset_screen_capture_permission() -> tuple[bool, str]:
     """Remove stale ScreenCapture records for this app's bundle identifier."""
     if sys.platform != "darwin":
