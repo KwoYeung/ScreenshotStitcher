@@ -220,12 +220,6 @@ class StitchApp(tk.Tk):
             state="normal" if capture_supported else "disabled",
         )
         self.capture_button.pack(side="left", fill="x", expand=True, padx=(6, 0))
-        if sys.platform == "darwin":
-            ttk.Button(
-                source_row,
-                text="修复截图权限",
-                command=self._repair_capture_permission,
-            ).pack(side="left", fill="x", expand=True, padx=(6, 0))
 
         region_row = ttk.Frame(left)
         region_row.grid(row=1, column=0, sticky="ew", pady=(6, 0))
@@ -569,17 +563,8 @@ class StitchApp(tk.Tk):
     def _capture_or_select_region(self) -> None:
         self._select_fixed_region() if self.capture_region is None else self._capture_fixed_region()
 
-    def _repair_capture_permission(self, confirm: bool = True) -> None:
+    def _repair_capture_permission(self) -> None:
         if sys.platform != "darwin":
-            return
-        if confirm and not messagebox.askyesno(
-            "修复截图权限",
-            "将清除“截图自动拼接”旧版本留下的录屏授权记录，"
-            "不会影响其他应用。\n\n"
-            "随后 macOS 会重新请求权限并打开系统设置。"
-            "是否继续？",
-            icon="warning",
-        ):
             return
         succeeded, detail = reset_screen_capture_permission()
         if not succeeded:
@@ -613,7 +598,7 @@ class StitchApp(tk.Tk):
             "是否立即修复？",
             icon="warning",
         ):
-            self._repair_capture_permission(confirm=False)
+            self._repair_capture_permission()
         else:
             open_screen_capture_settings()
         return False
