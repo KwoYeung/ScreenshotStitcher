@@ -10,6 +10,12 @@ from datetime import datetime
 from pathlib import Path
 
 
+MACOS_BUNDLE_IDENTIFIER = "com.screenshotstitcher.desktop"
+MACOS_SCREEN_CAPTURE_SETTINGS = (
+    "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
+)
+
+
 @dataclass(frozen=True, slots=True)
 class ScreenRect:
     x: int
@@ -50,6 +56,68 @@ def configure_process_dpi_awareness() -> None:
             ctypes.windll.user32.SetProcessDPIAware()
         except (AttributeError, OSError):
             pass
+
+
+def _core_graphics_permission_call(function_name: str) -> bool:
+    framework = ctypes.CDLL("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
+    function = getattr(framework, function_name)
+    function.argtypes = []
+    function.restype = ctypes.c_bool
+    return bool(function())
+
+
+def screen_capture_permission_granted() -> bool:
+    """Return whether macOS currently recognizes this build as authorized."""
+    if sys.platform != "darwin":
+        return True
+    try:
+        return _core_graphics_permission_call("CGPreflightScreenCaptureAccess")
+    except (AttributeError, OSError):
+        return False
+
+
+def request_screen_capture_permission() -> bool:
+    """Ask macOS to register and authorize the current application build."""
+    if sys.platform != "darwin":
+        return True
+    try:
+        return _core_graphics_permission_call("CGRequestScreenCaptureAccess")
+    except (AttributeError, OSError):
+        return False
+
+
+def reset_screen_capture_permission() -> tuple[bool, str]:
+    """Remove stale ScreenCapture records for this app's bundle identifier."""
+    if sys.platform != "darwin":
+        return False, "截图权限修复仅适用于 macOS"
+    try:
+        completed = subprocess.run(
+            ["/usr/bin/tccutil", "reset", "ScreenCapture", MACOS_BUNDLE_IDENTIFIER],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError as exc:
+        return False, str(exc)
+    detail = (completed.stderr or completed.stdout).strip()
+    if completed.returncode == 0:
+        return True, detail
+    return False, detail or f"tccutil 退出码：{completed.returncode}"
+
+
+def open_screen_capture_settings() -> bool:
+    """Open the macOS pane where the user must grant the final permission."""
+    if sys.platform != "darwin":
+        return False
+    try:
+        subprocess.Popen(
+            ["/usr/bin/open", MACOS_SCREEN_CAPTURE_SETTINGS],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except OSError:
+        return False
+    return True
 
 
 def active_displays() -> list[ScreenRect]:

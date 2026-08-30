@@ -7,7 +7,18 @@ from unittest.mock import patch
 from PIL import Image
 
 import screen_capture
-from screen_capture import ScreenRect, capture_argument, capture_filename, capture_region_to_file, frame_pieces
+from screen_capture import (
+    MACOS_BUNDLE_IDENTIFIER,
+    ScreenRect,
+    capture_argument,
+    capture_filename,
+    capture_region_to_file,
+    frame_pieces,
+    open_screen_capture_settings,
+    request_screen_capture_permission,
+    reset_screen_capture_permission,
+    screen_capture_permission_granted,
+)
 
 
 class ScreenCaptureTests(unittest.TestCase):
@@ -37,6 +48,44 @@ class ScreenCaptureTests(unittest.TestCase):
             ):
                 self.assertTrue(capture_region_to_file(destination, (-1920, 120, 800, 600)))
             grab.assert_called_once_with(bbox=(-1920, 120, -1120, 720), all_screens=True)
+
+    def test_non_macos_permission_is_already_available(self):
+        with patch.object(screen_capture.sys, "platform", "win32"):
+            self.assertTrue(screen_capture_permission_granted())
+
+    def test_macos_permission_uses_core_graphics_preflight_and_request(self):
+        with (
+            patch.object(screen_capture.sys, "platform", "darwin"),
+            patch.object(screen_capture, "_core_graphics_permission_call", side_effect=[False, True]) as call,
+        ):
+            self.assertFalse(screen_capture_permission_granted())
+            self.assertTrue(request_screen_capture_permission())
+        self.assertEqual(
+            [entry.args[0] for entry in call.call_args_list],
+            ["CGPreflightScreenCaptureAccess", "CGRequestScreenCaptureAccess"],
+        )
+
+    def test_reset_targets_only_this_apps_screen_capture_record(self):
+        completed = screen_capture.subprocess.CompletedProcess([], 0, stdout="reset", stderr="")
+        with (
+            patch.object(screen_capture.sys, "platform", "darwin"),
+            patch.object(screen_capture.subprocess, "run", return_value=completed) as run,
+        ):
+            succeeded, _detail = reset_screen_capture_permission()
+        self.assertTrue(succeeded)
+        command = run.call_args.args[0]
+        self.assertEqual(
+            command,
+            ["/usr/bin/tccutil", "reset", "ScreenCapture", MACOS_BUNDLE_IDENTIFIER],
+        )
+
+    def test_open_macos_permission_settings(self):
+        with (
+            patch.object(screen_capture.sys, "platform", "darwin"),
+            patch.object(screen_capture.subprocess, "Popen") as popen,
+        ):
+            self.assertTrue(open_screen_capture_settings())
+        self.assertEqual(popen.call_args.args[0][0], "/usr/bin/open")
 
 
 if __name__ == "__main__":

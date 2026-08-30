@@ -34,7 +34,11 @@ from screen_capture import (
     configure_persistent_overlay,
     configure_process_dpi_awareness,
     frame_pieces,
+    open_screen_capture_settings,
     place_windows_window,
+    request_screen_capture_permission,
+    reset_screen_capture_permission,
+    screen_capture_permission_granted,
     show_native_overlay,
 )
 from stitcher import MosaicResult, StitchResult, read_image, stitch_images, stitch_mosaic, write_image
@@ -43,7 +47,7 @@ from update_checker import ReleaseInfo, check_latest_release, is_newer_version
 
 configure_process_dpi_awareness()
 
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.1.1"
 DEVELOPER_NAME = "KwoYeung"
 
 
@@ -216,6 +220,12 @@ class StitchApp(tk.Tk):
             state="normal" if capture_supported else "disabled",
         )
         self.capture_button.pack(side="left", fill="x", expand=True, padx=(6, 0))
+        if sys.platform == "darwin":
+            ttk.Button(
+                source_row,
+                text="修复截图权限",
+                command=self._repair_capture_permission,
+            ).pack(side="left", fill="x", expand=True, padx=(6, 0))
 
         region_row = ttk.Frame(left)
         region_row.grid(row=1, column=0, sticky="ew", pady=(6, 0))
@@ -558,6 +568,55 @@ class StitchApp(tk.Tk):
 
     def _capture_or_select_region(self) -> None:
         self._select_fixed_region() if self.capture_region is None else self._capture_fixed_region()
+
+    def _repair_capture_permission(self, confirm: bool = True) -> None:
+        if sys.platform != "darwin":
+            return
+        if confirm and not messagebox.askyesno(
+            "修复截图权限",
+            "将清除“截图自动拼接”旧版本留下的录屏授权记录，"
+            "不会影响其他应用。\n\n"
+            "随后 macOS 会重新请求权限并打开系统设置。"
+            "是否继续？",
+            icon="warning",
+        ):
+            return
+        succeeded, detail = reset_screen_capture_permission()
+        if not succeeded:
+            messagebox.showerror(
+                "权限重置失败",
+                f"无法重置本软件的录屏权限。\n\n{detail}",
+            )
+            return
+        request_screen_capture_permission()
+        open_screen_capture_settings()
+        messagebox.showinfo(
+            "请重新授权",
+            "旧的录屏授权已清除。\n\n"
+            "1. 在已打开的“录屏与系统录音”中开启“截图自动拼接”。\n"
+            "2. 如果系统要求退出，请允许退出。\n"
+            "3. 然后从“应用程序”目录重新打开软件。\n\n"
+            "点击“好”后本软件将退出。",
+        )
+        self._on_close()
+
+    def _ensure_capture_permission(self) -> bool:
+        if sys.platform != "darwin" or screen_capture_permission_granted():
+            return True
+        if request_screen_capture_permission() or screen_capture_permission_granted():
+            return True
+        self.status.set("截图权限未生效")
+        if messagebox.askyesno(
+            "截图权限未生效",
+            "macOS 仍未将录屏权限授予当前版本。\n\n"
+            "如果系统设置中的开关已经打开，通常是旧版本授权记录失效。"
+            "是否立即修复？",
+            icon="warning",
+        ):
+            self._repair_capture_permission(confirm=False)
+        else:
+            open_screen_capture_settings()
+        return False
 
     def _clear_fixed_region(self) -> None:
         """Remove the persistent frame without touching captured images."""
@@ -909,6 +968,8 @@ class StitchApp(tk.Tk):
             return
         if self.capture_region is None:
             self._select_fixed_region()
+            return
+        if not self._ensure_capture_permission():
             return
         self.capture_in_progress = True
         path = self._next_capture_path()
