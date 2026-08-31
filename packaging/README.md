@@ -23,7 +23,9 @@ bash packaging/build_macos.sh
 packaging\build_windows.bat
 ```
 
-脚本会创建独立的 `.venv-build-windows` 构建环境，产物为 `release\windows\ScreenshotStitcher.exe`。exe 中包含 Python、OpenCV、NumPy 和 Pillow，最终用户无需安装 Python。
+脚本会创建独立的 `.venv-build-windows` 构建环境，产物为 `release\windows\ScreenshotStitcher-v1.1.1-Windows-x64.exe`。exe 中包含 Python、OpenCV、NumPy 和 Pillow，最终用户无需安装 Python。
+
+打包完成后，可先在 Windows 10/11 上双击运行一次进行验证，然后将这一个带版本号的 EXE 上传到 GitHub 的 `v1.1.1` Release。
 
 PyInstaller 不支持从 macOS 交叉编译 Windows exe，因此 Windows 产物必须在 Windows 上构建和验证。
 
