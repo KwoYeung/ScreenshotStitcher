@@ -86,6 +86,15 @@ class StitchApp(tk.Tk):
         self.capture_controller_text_item: int | None = None
         self.controller_reset_job: str | None = None
         self.capture_in_progress = False
+        self.capture_permission_request_started = False
+        self.capture_permission_dialog_active = False
+        self.capture_permission_marker = (
+            Path.home()
+            / "Library"
+            / "Application Support"
+            / "ScreenshotStitcher"
+            / "screen-capture-requested"
+        )
 
         self.selection_start: tuple[int, int] | None = None
         self.selection_local_start: tuple[int, int] | None = None
@@ -573,6 +582,7 @@ class StitchApp(tk.Tk):
                 f"无法重置本软件的录屏权限。\n\n{detail}",
             )
             return
+        self._clear_capture_permission_marker()
         messagebox.showinfo(
             "旧授权已清除",
             "旧的录屏授权已清除。\n\n"
@@ -584,7 +594,42 @@ class StitchApp(tk.Tk):
         )
         self._on_close()
 
+    def _capture_permission_was_requested(self) -> bool:
+        try:
+            return self.capture_permission_marker.exists()
+        except OSError:
+            return False
+
+    def _mark_capture_permission_requested(self) -> None:
+        try:
+            self.capture_permission_marker.parent.mkdir(parents=True, exist_ok=True)
+            self.capture_permission_marker.touch(exist_ok=True)
+        except OSError:
+            pass
+
+    def _clear_capture_permission_marker(self) -> None:
+        try:
+            self.capture_permission_marker.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    def _request_capture_permission(self) -> None:
+        if sys.platform != "darwin" or self.capture_permission_request_started:
+            return
+        self.capture_permission_request_started = True
+        self._mark_capture_permission_requested()
+        self.status.set("请在 macOS 系统提示中开启录屏权限")
+        if register_screen_capture_permission():
+            self.capture_permission_request_started = False
+            self._clear_capture_permission_marker()
+            self.status.set("截图权限已开启，可以继续截图")
+            return
+        self.status.set("完成系统授权后，请完全退出并重新打开软件")
+
     def _capture_permission_action(self) -> str:
+        if self.capture_permission_dialog_active:
+            return "cancel"
+        self.capture_permission_dialog_active = True
         dialog = tk.Toplevel(self)
         dialog.title("macOS 截图权限")
         dialog.resizable(False, False)
@@ -602,8 +647,9 @@ class StitchApp(tk.Tk):
         ttk.Label(
             content,
             text=(
-                "首次使用，或当前开关尚未开启：请选“打开系统设置”。\n"
-                "如果开关已经开启，但更新后仍提示无权限：请选“重置旧授权”。"
+                "请先在系统设置中开启“截图自动拼接”。\n"
+                "如果列表中没有本软件，可选“重新申请”；"
+                "只有开关已开启仍无效时，才需要重置旧授权。"
             ),
             foreground="#555555",
             justify="left",
@@ -620,6 +666,9 @@ class StitchApp(tk.Tk):
         ttk.Button(buttons, text="重置旧授权", command=lambda: choose("reset")).pack(
             side="right", padx=(0, 7)
         )
+        ttk.Button(buttons, text="重新申请", command=lambda: choose("request")).pack(
+            side="right", padx=(0, 7)
+        )
         ttk.Button(buttons, text="打开系统设置", command=lambda: choose("settings")).pack(
             side="right", padx=(0, 7)
         )
@@ -629,24 +678,31 @@ class StitchApp(tk.Tk):
         y = self.winfo_rooty() + max(0, (self.winfo_height() - dialog.winfo_reqheight()) // 2)
         dialog.geometry(f"+{x}+{y}")
         self.wait_window(dialog)
+        self.capture_permission_dialog_active = False
         return result.get()
 
     def _ensure_capture_permission(self) -> bool:
-        if sys.platform != "darwin" or screen_capture_permission_granted():
+        if sys.platform != "darwin":
             return True
-        if register_screen_capture_permission():
+        if screen_capture_permission_granted():
+            self.capture_permission_request_started = False
+            self._clear_capture_permission_marker()
             return True
+        if self.capture_permission_request_started:
+            self.status.set("完成系统授权后，请完全退出并重新打开软件")
+            return False
+        if not self._capture_permission_was_requested():
+            self.after_idle(self._request_capture_permission)
+            return False
         self.status.set("截图权限未生效")
         action = self._capture_permission_action()
         if action == "reset":
             self._repair_capture_permission()
+        elif action == "request":
+            self.after(150, self._request_capture_permission)
         elif action == "settings":
             open_screen_capture_settings()
-            messagebox.showinfo(
-                "请完成授权",
-                "请在“录屏与系统录音”中开启“截图自动拼接”。\n\n"
-                "开启后请用 Command + Q 完全退出本软件，再从“应用程序”重新打开。",
-            )
+            self.status.set("请在系统设置中开启权限，然后完全退出并重开软件")
         return False
 
     def _clear_fixed_region(self) -> None:
