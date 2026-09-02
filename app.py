@@ -80,6 +80,8 @@ class StitchApp(tk.Tk):
         self.result_zoom_text = tk.StringVar(value="滚轮缩放")
         self.result_crop_mode = False
         self.result_crop_start: tuple[float, float] | None = None
+        self.result_crop_drag_kind: str | None = None
+        self.result_crop_drag_initial_bounds: tuple[int, int, int, int] | None = None
         self.result_crop_bounds: tuple[int, int, int, int] | None = None
         self.result_crop_rectangle: int | None = None
         self.result_crop_backup: tuple[
@@ -161,31 +163,154 @@ class StitchApp(tk.Tk):
 
     def _build_ui(self) -> None:
         style = ttk.Style(self)
-        style.configure("Accent.TButton", font=("TkDefaultFont", 11, "bold"), padding=(14, 8))
-        style.configure("Image.Treeview", rowheight=84)
-        root = ttk.Frame(self, padding=12)
+        if "clam" in style.theme_names():
+            style.theme_use("clam")
+        ui_font = "Helvetica Neue" if sys.platform == "darwin" else "Segoe UI"
+        self.configure(background="#ffffff")
+        style.configure(".", font=(ui_font, 11), background="#ffffff", foreground="#212121")
+        style.configure("App.TFrame", background="#ffffff")
+        style.configure("Page.TFrame", background="#eeece7")
+        style.configure("Card.TFrame", background="#ffffff", relief="solid", borderwidth=1)
+        style.configure("Header.TFrame", background="#003c33")
+        style.configure(
+            "HeaderTitle.TLabel",
+            background="#003c33",
+            foreground="#ffffff",
+            font=(ui_font, 20),
+        )
+        style.configure("HeaderMeta.TLabel", background="#003c33", foreground="#d9eee9")
+        style.configure("Section.TLabel", font=(ui_font, 12, "bold"), foreground="#212121")
+        style.configure("Muted.TLabel", foreground="#75758a")
+        style.configure(
+            "TButton",
+            background="#ffffff",
+            foreground="#212121",
+            bordercolor="#d9d9dd",
+            lightcolor="#ffffff",
+            darkcolor="#ffffff",
+            relief="flat",
+            padding=(12, 8),
+        )
+        style.map(
+            "TButton",
+            background=[("active", "#eeece7"), ("disabled", "#f5f5f5")],
+            foreground=[("disabled", "#93939f")],
+            bordercolor=[("focus", "#4c6ee6"), ("active", "#93939f")],
+        )
+        style.configure(
+            "Accent.TButton",
+            font=(ui_font, 11, "bold"),
+            background="#17171c",
+            foreground="#ffffff",
+            bordercolor="#17171c",
+            lightcolor="#17171c",
+            darkcolor="#17171c",
+            padding=(16, 10),
+        )
+        style.map(
+            "Accent.TButton",
+            background=[("active", "#003c33"), ("disabled", "#d9d9dd")],
+            foreground=[("disabled", "#75758a")],
+            bordercolor=[("focus", "#4c6ee6")],
+        )
+        style.configure(
+            "Header.TButton",
+            background="#003c33",
+            foreground="#ffffff",
+            bordercolor="#7aa69e",
+            lightcolor="#003c33",
+            darkcolor="#003c33",
+            padding=(12, 7),
+        )
+        style.map("Header.TButton", background=[("active", "#075348")])
+        style.configure(
+            "Card.TLabelframe",
+            background="#ffffff",
+            bordercolor="#d9d9dd",
+            lightcolor="#ffffff",
+            darkcolor="#ffffff",
+            relief="solid",
+            borderwidth=1,
+        )
+        style.configure(
+            "Card.TLabelframe.Label",
+            background="#ffffff",
+            foreground="#212121",
+            font=(ui_font, 11, "bold"),
+        )
+        style.configure(
+            "App.TNotebook",
+            background="#eeece7",
+            borderwidth=0,
+            tabmargins=(0, 8, 0, 0),
+        )
+        style.configure(
+            "App.TNotebook.Tab",
+            background="#eeece7",
+            foreground="#616161",
+            padding=(18, 10),
+            borderwidth=0,
+        )
+        style.map(
+            "App.TNotebook.Tab",
+            background=[("selected", "#ffffff"), ("active", "#f7f6f3")],
+            foreground=[("selected", "#003c33")],
+        )
+        style.configure(
+            "Image.Treeview",
+            rowheight=84,
+            background="#ffffff",
+            fieldbackground="#ffffff",
+            bordercolor="#d9d9dd",
+        )
+        style.map(
+            "Image.Treeview",
+            background=[("selected", "#dceee9")],
+            foreground=[("selected", "#212121")],
+        )
+        style.configure(
+            "Treeview.Heading",
+            background="#eeece7",
+            foreground="#212121",
+            relief="flat",
+        )
+
+        root = ttk.Frame(self, style="App.TFrame")
         root.pack(fill="both", expand=True)
         root.rowconfigure(1, weight=1)
         root.columnconfigure(0, weight=1)
-        header = ttk.Frame(root)
-        header.grid(row=0, column=0, sticky="ew", pady=(0, 8))
-        ttk.Label(header, text="截图自动拼接", font=("TkDefaultFont", 19, "bold")).pack(side="left")
-        ttk.Button(header, text="关于", command=self._show_about).pack(side="right")
+        header = ttk.Frame(root, style="Header.TFrame", padding=(18, 14))
+        header.grid(row=0, column=0, sticky="ew")
+        ttk.Label(header, text="截图自动拼接", style="HeaderTitle.TLabel").pack(side="left")
+        ttk.Label(header, text="SCREENSHOT STITCHER", style="HeaderMeta.TLabel").pack(
+            side="left", padx=(14, 0), pady=(5, 0)
+        )
+        ttk.Button(header, text="关于", style="Header.TButton", command=self._show_about).pack(
+            side="right"
+        )
+        if sys.platform == "darwin":
+            ttk.Button(
+                header,
+                text="重置截图权限",
+                style="Header.TButton",
+                command=self._confirm_repair_capture_permission,
+            ).pack(side="right", padx=(0, 8))
 
-        self.notebook = ttk.Notebook(root)
+        self.notebook = ttk.Notebook(root, style="App.TNotebook")
         self.notebook.grid(row=1, column=0, sticky="nsew")
-        self.capture_page = ttk.Frame(self.notebook, padding=10)
-        self.result_page = ttk.Frame(self.notebook, padding=10)
+        self.capture_page = ttk.Frame(self.notebook, padding=14, style="Page.TFrame")
+        self.result_page = ttk.Frame(self.notebook, padding=14, style="Page.TFrame")
         self.notebook.add(self.capture_page, text="① 截图管理")
         self.notebook.add(self.result_page, text="② 拼接结果")
         self._build_capture_page()
         self._build_result_page()
-        footer = ttk.Frame(root)
-        footer.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+        footer = ttk.Frame(root, style="App.TFrame", padding=(16, 10))
+        footer.grid(row=2, column=0, sticky="ew")
         self.version_label = tk.Label(
             footer,
             textvariable=self.version_status,
             foreground="#6e6e73",
+            background="#ffffff",
             cursor="arrow",
             borderwidth=0,
             padx=0,
@@ -194,8 +319,12 @@ class StitchApp(tk.Tk):
         self.version_label.pack(side="left")
         self.version_label.bind("<Button-1>", self._open_update_release)
         ttk.Separator(footer, orient="vertical").pack(side="left", fill="y", padx=9)
-        ttk.Label(footer, textvariable=self.status, anchor="w").pack(side="left", fill="x", expand=True)
-        ttk.Label(footer, text=f"© 2026 {DEVELOPER_NAME}", foreground="#6e6e73").pack(side="right", padx=(12, 0))
+        ttk.Label(footer, textvariable=self.status, anchor="w", style="Muted.TLabel").pack(
+            side="left", fill="x", expand=True
+        )
+        ttk.Label(footer, text=f"© 2026 {DEVELOPER_NAME}", style="Muted.TLabel").pack(
+            side="right", padx=(12, 0)
+        )
 
     def _show_about(self) -> None:
         messagebox.showinfo(
@@ -227,7 +356,7 @@ class StitchApp(tk.Tk):
         page = self.capture_page
         page.rowconfigure(0, weight=1)
         page.columnconfigure(1, weight=1)
-        left = ttk.Frame(page, width=455)
+        left = ttk.Frame(page, width=455, padding=14, style="Card.TFrame")
         left.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
         left.grid_propagate(False)
         left.columnconfigure(0, weight=1)
@@ -270,7 +399,7 @@ class StitchApp(tk.Tk):
             row=3, column=0, sticky="w", pady=(2, 8)
         )
 
-        ttk.Label(left, text="截图列表（支持多选）", font=("TkDefaultFont", 11, "bold")).grid(
+        ttk.Label(left, text="截图列表（支持多选）", style="Section.TLabel").grid(
             row=4, column=0, sticky="w"
         )
         tree_frame = ttk.Frame(left)
@@ -299,7 +428,7 @@ class StitchApp(tk.Tk):
         ttk.Button(edit_row, text="移除选中", command=self._remove).pack(side="left", fill="x", expand=True)
         ttk.Button(edit_row, text="全部清理", command=self._remove_all).pack(side="left", fill="x", expand=True, padx=(6, 0))
 
-        options = ttk.LabelFrame(left, text="拼接设置", padding=8)
+        options = ttk.LabelFrame(left, text="拼接设置", padding=10, style="Card.TLabelframe")
         options.grid(row=7, column=0, sticky="ew", pady=(10, 0))
         mode_row = ttk.Frame(options)
         mode_row.pack(fill="x")
@@ -353,11 +482,11 @@ class StitchApp(tk.Tk):
         self.run_button = ttk.Button(left, text="开始二维拼接", style="Accent.TButton", command=self._start)
         self.run_button.grid(row=8, column=0, sticky="ew", pady=(10, 0))
 
-        preview = ttk.LabelFrame(page, text="单张截图预览", padding=8)
+        preview = ttk.LabelFrame(page, text="单张截图预览", padding=10, style="Card.TLabelframe")
         preview.grid(row=0, column=1, sticky="nsew")
         preview.rowconfigure(0, weight=1)
         preview.columnconfigure(0, weight=1)
-        self.input_preview_canvas = tk.Canvas(preview, background="#262626", highlightthickness=0)
+        self.input_preview_canvas = tk.Canvas(preview, background="#071829", highlightthickness=0)
         self.input_preview_canvas.grid(row=0, column=0, sticky="nsew")
         ttk.Label(preview, textvariable=self.preview_info, anchor="center").grid(row=1, column=0, sticky="ew", pady=(7, 0))
 
@@ -365,17 +494,18 @@ class StitchApp(tk.Tk):
         page = self.result_page
         page.rowconfigure(0, weight=1)
         page.columnconfigure(0, weight=1)
-        preview = ttk.LabelFrame(page, text="拼接预览", padding=8)
+        preview = ttk.LabelFrame(page, text="拼接预览", padding=10, style="Card.TLabelframe")
         preview.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
         preview.rowconfigure(0, weight=1)
         preview.columnconfigure(0, weight=1)
-        self.canvas = tk.Canvas(preview, background="#252525", highlightthickness=0)
+        self.canvas = tk.Canvas(preview, background="#071829", highlightthickness=0)
         self.canvas.bind("<MouseWheel>", self._zoom_result_preview)
         self.canvas.bind("<Button-4>", lambda event: self._zoom_result_preview(event, 1))
         self.canvas.bind("<Button-5>", lambda event: self._zoom_result_preview(event, -1))
         self.canvas.bind("<ButtonPress-1>", self._result_crop_begin)
         self.canvas.bind("<B1-Motion>", self._result_crop_move)
         self.canvas.bind("<ButtonRelease-1>", self._result_crop_finish)
+        self.canvas.bind("<Motion>", self._result_crop_hover)
         vertical = ttk.Scrollbar(preview, orient="vertical", command=self.canvas.yview)
         horizontal = ttk.Scrollbar(preview, orient="horizontal", command=self.canvas.xview)
         self.canvas.configure(yscrollcommand=vertical.set, xscrollcommand=horizontal.set)
@@ -385,11 +515,21 @@ class StitchApp(tk.Tk):
         ttk.Label(preview, textvariable=self.result_zoom_text, anchor="center").grid(
             row=2, column=0, sticky="ew", pady=(6, 0)
         )
-        side = ttk.Frame(page, width=330)
+        side = ttk.Frame(page, width=360, padding=14, style="Card.TFrame")
         side.grid(row=0, column=1, sticky="nsew")
-        side.grid_propagate(False)
-        ttk.Label(side, text="匹配记录", font=("TkDefaultFont", 12, "bold")).pack(anchor="w")
-        self.report = tk.Text(side, wrap="word", state="disabled", background="#f3f3f3")
+        side.pack_propagate(False)
+        ttk.Label(side, text="匹配记录", style="Section.TLabel").pack(anchor="w")
+        self.report = tk.Text(
+            side,
+            wrap="word",
+            state="disabled",
+            background="#eeece7",
+            foreground="#212121",
+            relief="flat",
+            borderwidth=0,
+            padx=10,
+            pady=10,
+        )
         self.report.pack(fill="both", expand=True, pady=(6, 10))
         self.crop_button = ttk.Button(
             side,
@@ -614,6 +754,19 @@ class StitchApp(tk.Tk):
     def _capture_or_select_region(self) -> None:
         self._select_fixed_region() if self.capture_region is None else self._capture_fixed_region()
 
+    def _confirm_repair_capture_permission(self) -> None:
+        if sys.platform != "darwin":
+            return
+        if not messagebox.askyesno(
+            "重置截图权限",
+            "仅当系统设置中的开关已经打开，但软件仍无法截图时使用。\n\n"
+            "重置后软件会退出；重新打开并点击截图，"
+            "macOS 将重新弹出授权。\n\n是否继续？",
+            icon="warning",
+        ):
+            return
+        self._repair_capture_permission()
+
     def _repair_capture_permission(self) -> None:
         if sys.platform != "darwin":
             return
@@ -666,7 +819,10 @@ class StitchApp(tk.Tk):
             self._clear_capture_permission_marker()
             self.status.set("截图权限已开启，可以继续截图")
             return
-        self.status.set("完成系统授权后，请完全退出并重新打开软件")
+        self.status.set(
+            "完成系统授权后请重开软件；"
+            "如开关已打开仍无效，请点击顶部“重置截图权限”"
+        )
 
     def _capture_permission_action(self) -> str:
         if self.capture_permission_dialog_active:
@@ -1301,12 +1457,14 @@ class StitchApp(tk.Tk):
             self.result_zoom_text.set(f"滚轮缩放：{scale:.0%}  ·  拖动滚动条查看画布")
             self._draw_result_crop()
 
-    def _result_crop_point(self, event: tk.Event) -> tuple[float, float]:
+    def _result_crop_point(self, event: tk.Event, clamp: bool = True) -> tuple[float, float]:
         if self.result is None:
             return 0.0, 0.0
         scale = max(self.result_preview_scale, 1e-6)
         x = self.canvas.canvasx(event.x) / scale
         y = self.canvas.canvasy(event.y) / scale
+        if not clamp:
+            return float(x), float(y)
         return (
             float(np.clip(x, 0, self.result.image.shape[1])),
             float(np.clip(y, 0, self.result.image.shape[0])),
@@ -1330,57 +1488,149 @@ class StitchApp(tk.Tk):
     def _result_crop_begin(self, event: tk.Event) -> str | None:
         if not self.result_crop_mode or self.result is None:
             return None
-        self.result_crop_start = self._result_crop_point(event)
-        self.result_crop_bounds = None
+        raw_point = self._result_crop_point(event, clamp=False)
+        point = self._result_crop_point(event)
+        self.result_crop_start = point
+        self.result_crop_drag_kind = self._result_crop_hit_test(raw_point)
+        self.result_crop_drag_initial_bounds = self.result_crop_bounds
         self.apply_crop_button.configure(state="disabled")
-        if self.result_crop_rectangle is not None:
-            self.canvas.delete(self.result_crop_rectangle)
+        if self.result_crop_drag_kind == "new":
+            self.result_crop_bounds = None
+            self.canvas.delete("result_crop_overlay")
             self.result_crop_rectangle = None
         return "break"
 
     def _result_crop_move(self, event: tk.Event) -> str | None:
-        if not self.result_crop_mode or self.result_crop_start is None:
+        if (
+            not self.result_crop_mode
+            or self.result_crop_start is None
+            or self.result is None
+            or self.result_crop_drag_kind is None
+        ):
             return None
-        x0, y0 = self.result_crop_start
-        x1, y1 = self._result_crop_point(event)
-        scale = self.result_preview_scale
-        coordinates = (x0 * scale, y0 * scale, x1 * scale, y1 * scale)
-        if self.result_crop_rectangle is None:
-            self.result_crop_rectangle = self.canvas.create_rectangle(
-                *coordinates,
-                outline="#00a8ff",
-                width=2,
-                dash=(7, 4),
+        current = self._result_crop_point(event)
+        if self.result_crop_drag_kind == "new":
+            x0, y0 = self.result_crop_start
+            x1, y1 = current
+            self.result_crop_bounds = (
+                max(0, int(np.floor(min(x0, x1)))),
+                max(0, int(np.floor(min(y0, y1)))),
+                min(self.result.image.shape[1], int(np.ceil(max(x0, x1)))),
+                min(self.result.image.shape[0], int(np.ceil(max(y0, y1)))),
             )
         else:
-            self.canvas.coords(self.result_crop_rectangle, *coordinates)
+            self.result_crop_bounds = self._adjust_result_crop_bounds(current)
+        self._draw_result_crop()
         return "break"
 
     def _result_crop_finish(self, event: tk.Event) -> str | None:
         if not self.result_crop_mode or self.result_crop_start is None or self.result is None:
             return None
-        x0, y0 = self.result_crop_start
-        x1, y1 = self._result_crop_point(event)
-        left = max(0, int(np.floor(min(x0, x1))))
-        top = max(0, int(np.floor(min(y0, y1))))
-        right = min(self.result.image.shape[1], int(np.ceil(max(x0, x1))))
-        bottom = min(self.result.image.shape[0], int(np.ceil(max(y0, y1))))
+        self._result_crop_move(event)
         self.result_crop_start = None
-        if right - left < 2 or bottom - top < 2:
-            self.result_crop_bounds = None
+        self.result_crop_drag_kind = None
+        self.result_crop_drag_initial_bounds = None
+        if self.result_crop_bounds is None:
             self.apply_crop_button.configure(state="disabled")
             self.status.set("裁剪范围太小，请重新拖动框选")
             return "break"
-        self.result_crop_bounds = (left, top, right, bottom)
+        left, top, right, bottom = self.result_crop_bounds
+        if right - left < 2 or bottom - top < 2:
+            self.result_crop_bounds = None
+            self._draw_result_crop()
+            self.apply_crop_button.configure(state="disabled")
+            self.status.set("裁剪范围太小，请重新拖动框选")
+            return "break"
         self.apply_crop_button.configure(state="normal")
         self._draw_result_crop()
-        self.status.set(f"已框选 {right - left} × {bottom - top} 像素；点击“应用裁剪”确认")
+        self.status.set(
+            f"已框选 {right - left} × {bottom - top} 像素；"
+            "拖动框内可移动，拖动四角或四边控制点可微调"
+        )
         return "break"
 
+    def _result_crop_hit_test(self, point: tuple[float, float]) -> str:
+        if self.result_crop_bounds is None:
+            return "new"
+        x, y = point
+        left, top, right, bottom = self.result_crop_bounds
+        tolerance = max(3.0, 9.0 / max(self.result_preview_scale, 1e-6))
+        near_left = abs(x - left) <= tolerance
+        near_right = abs(x - right) <= tolerance
+        near_top = abs(y - top) <= tolerance
+        near_bottom = abs(y - bottom) <= tolerance
+        within_x = left - tolerance <= x <= right + tolerance
+        within_y = top - tolerance <= y <= bottom + tolerance
+        if near_left and near_top:
+            return "nw"
+        if near_right and near_top:
+            return "ne"
+        if near_left and near_bottom:
+            return "sw"
+        if near_right and near_bottom:
+            return "se"
+        if near_top and within_x:
+            return "n"
+        if near_bottom and within_x:
+            return "s"
+        if near_left and within_y:
+            return "w"
+        if near_right and within_y:
+            return "e"
+        if left < x < right and top < y < bottom:
+            return "move"
+        return "new"
+
+    def _adjust_result_crop_bounds(
+        self, current: tuple[float, float]
+    ) -> tuple[int, int, int, int] | None:
+        if (
+            self.result is None
+            or self.result_crop_start is None
+            or self.result_crop_drag_kind is None
+            or self.result_crop_drag_initial_bounds is None
+        ):
+            return self.result_crop_bounds
+        start_x, start_y = self.result_crop_start
+        current_x, current_y = current
+        delta_x, delta_y = current_x - start_x, current_y - start_y
+        left, top, right, bottom = map(float, self.result_crop_drag_initial_bounds)
+        width_limit = self.result.image.shape[1]
+        height_limit = self.result.image.shape[0]
+        kind = self.result_crop_drag_kind
+        if kind == "move":
+            width, height = right - left, bottom - top
+            left = float(np.clip(left + delta_x, 0, width_limit - width))
+            top = float(np.clip(top + delta_y, 0, height_limit - height))
+            right, bottom = left + width, top + height
+        else:
+            if "w" in kind:
+                left = float(np.clip(left + delta_x, 0, right - 2))
+            if "e" in kind:
+                right = float(np.clip(right + delta_x, left + 2, width_limit))
+            if "n" in kind:
+                top = float(np.clip(top + delta_y, 0, bottom - 2))
+            if "s" in kind:
+                bottom = float(np.clip(bottom + delta_y, top + 2, height_limit))
+        return tuple(round(value) for value in (left, top, right, bottom))  # type: ignore[return-value]
+
+    def _result_crop_hover(self, event: tk.Event) -> None:
+        if not self.result_crop_mode or self.result is None or self.result_crop_start is not None:
+            return
+        kind = self._result_crop_hit_test(self._result_crop_point(event, clamp=False))
+        if kind == "move":
+            cursor = "fleur"
+        elif kind in {"e", "w"}:
+            cursor = "sb_h_double_arrow"
+        elif kind in {"n", "s"}:
+            cursor = "sb_v_double_arrow"
+        else:
+            cursor = "crosshair"
+        self.canvas.configure(cursor=cursor)
+
     def _draw_result_crop(self) -> None:
-        if self.result_crop_rectangle is not None:
-            self.canvas.delete(self.result_crop_rectangle)
-            self.result_crop_rectangle = None
+        self.canvas.delete("result_crop_overlay")
+        self.result_crop_rectangle = None
         if self.result_crop_bounds is None:
             return
         left, top, right, bottom = self.result_crop_bounds
@@ -1390,18 +1640,43 @@ class StitchApp(tk.Tk):
             top * scale,
             right * scale,
             bottom * scale,
-            outline="#00a8ff",
+            outline="#4c6ee6",
             width=2,
             dash=(7, 4),
+            tags=("result_crop_overlay",),
         )
+        handle_radius = 5
+        handles = (
+            (left, top),
+            ((left + right) / 2, top),
+            (right, top),
+            (left, (top + bottom) / 2),
+            (right, (top + bottom) / 2),
+            (left, bottom),
+            ((left + right) / 2, bottom),
+            (right, bottom),
+        )
+        for x, y in handles:
+            center_x, center_y = x * scale, y * scale
+            self.canvas.create_rectangle(
+                center_x - handle_radius,
+                center_y - handle_radius,
+                center_x + handle_radius,
+                center_y + handle_radius,
+                fill="#ffffff",
+                outline="#4c6ee6",
+                width=2,
+                tags=("result_crop_overlay",),
+            )
 
     def _reset_result_crop(self, clear_backup: bool) -> None:
         self.result_crop_mode = False
         self.result_crop_start = None
+        self.result_crop_drag_kind = None
+        self.result_crop_drag_initial_bounds = None
         self.result_crop_bounds = None
-        if self.result_crop_rectangle is not None:
-            self.canvas.delete(self.result_crop_rectangle)
-            self.result_crop_rectangle = None
+        self.canvas.delete("result_crop_overlay")
+        self.result_crop_rectangle = None
         if clear_backup:
             self.result_crop_backup = None
         self.canvas.configure(cursor="")
