@@ -12,8 +12,8 @@ ScreenshotStitcher 是一款本地运行的桌面截图拼接工具。它可以�
 
 | 系统 | 安装包 | 说明 |
 | --- | --- | --- |
-| macOS | [`ScreenshotStitcher-v1.1.1-macOS-arm64.dmg`](https://github.com/KwoYeung/ScreenshotStitcher/releases/download/v1.1.1/ScreenshotStitcher-v1.1.1-macOS-arm64.dmg) | 适用于 Apple Silicon（M 系列芯片） |
-| Windows | [`ScreenshotStitcher-v1.1.1-Windows-x64.exe`](https://github.com/KwoYeung/ScreenshotStitcher/releases/tag/v1.1.1) | 适用于 Windows 10/11，EXE 将补充到同一 Release |
+| macOS | [`ScreenshotStitcher-v1.2.0-macOS-arm64.dmg`](https://github.com/KwoYeung/ScreenshotStitcher/releases/download/v1.2.0/ScreenshotStitcher-v1.2.0-macOS-arm64.dmg) | 适用于 Apple Silicon（M 系列芯片） |
+| Windows | [`ScreenshotStitcher-v1.2.0-Windows-x64.exe`](https://github.com/KwoYeung/ScreenshotStitcher/releases/tag/v1.2.0) | 适用于 Windows 10/11，EXE 将补充到同一 Release |
 
 安装包已包含程序所需的运行环境，**普通用户无需安装 Python、OpenCV 或其他依赖**。
 
@@ -40,7 +40,7 @@ ScreenshotStitcher 是一款本地运行的桌面截图拼接工具。它可以�
 
 ### macOS
 
-1. 下载 `ScreenshotStitcher-v1.1.1-macOS-arm64.dmg`。
+1. 下载 `ScreenshotStitcher-v1.2.0-macOS-arm64.dmg`。
 2. 打开 DMG，将应用拖入“应用程序”文件夹。
 3. 首次启动时，按系统提示允许屏幕录制权限。
 
@@ -48,7 +48,7 @@ ScreenshotStitcher 是一款本地运行的桌面截图拼接工具。它可以�
 
 ### Windows
 
-1. 下载 `ScreenshotStitcher-v1.1.1-Windows-x64.exe`。
+1. 下载 `ScreenshotStitcher-v1.2.0-Windows-x64.exe`。
 2. 双击运行，无需安装。
 
 如果 Windows SmartScreen 在首次启动时显示提示，请核对下载来源为本项目的 GitHub Releases，然后选择“更多信息 → 仍要运行”。
