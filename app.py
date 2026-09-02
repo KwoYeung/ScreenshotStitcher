@@ -167,27 +167,14 @@ class StitchApp(tk.Tk):
         # controls. This preserves rounded buttons, focus rings, and system fonts.
         style.configure("Accent.TButton", font=("TkDefaultFont", 11, "bold"), padding=(14, 8))
         style.configure("Image.Treeview", rowheight=84)
-        root = ttk.Frame(self)
+        root = ttk.Frame(self, padding=12)
         root.pack(fill="both", expand=True)
         root.rowconfigure(1, weight=1)
         root.columnconfigure(0, weight=1)
-        header = tk.Frame(root, background="#003c33", padx=18, pady=12)
-        header.grid(row=0, column=0, sticky="ew")
-        tk.Label(
-            header,
-            text="截图自动拼接",
-            background="#003c33",
-            foreground="#ffffff",
-            font=("TkDefaultFont", 19, "bold"),
-        ).pack(side="left")
-        tk.Label(
-            header,
-            text="SCREENSHOT STITCHER",
-            background="#003c33",
-            foreground="#d9eee9",
-            font=("TkDefaultFont", 9),
-        ).pack(
-            side="left", padx=(14, 0), pady=(5, 0)
+        header = ttk.Frame(root)
+        header.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        ttk.Label(header, text="截图自动拼接", font=("TkDefaultFont", 19, "bold")).pack(
+            side="left"
         )
         ttk.Button(header, text="关于", command=self._show_about).pack(side="right")
         if sys.platform == "darwin":
@@ -199,14 +186,14 @@ class StitchApp(tk.Tk):
 
         self.notebook = ttk.Notebook(root)
         self.notebook.grid(row=1, column=0, sticky="nsew")
-        self.capture_page = ttk.Frame(self.notebook, padding=12)
-        self.result_page = ttk.Frame(self.notebook, padding=12)
+        self.capture_page = ttk.Frame(self.notebook, padding=10)
+        self.result_page = ttk.Frame(self.notebook, padding=10)
         self.notebook.add(self.capture_page, text="① 截图管理")
         self.notebook.add(self.result_page, text="② 拼接结果")
         self._build_capture_page()
         self._build_result_page()
-        footer = ttk.Frame(root, padding=(14, 8))
-        footer.grid(row=2, column=0, sticky="ew")
+        footer = ttk.Frame(root)
+        footer.grid(row=2, column=0, sticky="ew", pady=(8, 0))
         self.version_label = tk.Label(
             footer,
             textvariable=self.version_status,
@@ -219,7 +206,7 @@ class StitchApp(tk.Tk):
         self.version_label.pack(side="left")
         self.version_label.bind("<Button-1>", self._open_update_release)
         ttk.Separator(footer, orient="vertical").pack(side="left", fill="y", padx=9)
-        ttk.Label(footer, textvariable=self.status, anchor="w", foreground="#6e6e73").pack(
+        ttk.Label(footer, textvariable=self.status, anchor="w").pack(
             side="left", fill="x", expand=True
         )
         ttk.Label(footer, text=f"© 2026 {DEVELOPER_NAME}", foreground="#6e6e73").pack(
@@ -256,7 +243,7 @@ class StitchApp(tk.Tk):
         page = self.capture_page
         page.rowconfigure(0, weight=1)
         page.columnconfigure(1, weight=1)
-        left = ttk.Frame(page, width=455, padding=12)
+        left = ttk.Frame(page, width=455)
         left.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
         left.grid_propagate(False)
         left.columnconfigure(0, weight=1)
@@ -328,7 +315,7 @@ class StitchApp(tk.Tk):
         ttk.Button(edit_row, text="移除选中", command=self._remove).pack(side="left", fill="x", expand=True)
         ttk.Button(edit_row, text="全部清理", command=self._remove_all).pack(side="left", fill="x", expand=True, padx=(6, 0))
 
-        options = ttk.LabelFrame(left, text="拼接设置", padding=10)
+        options = ttk.LabelFrame(left, text="拼接设置", padding=8)
         options.grid(row=7, column=0, sticky="ew", pady=(10, 0))
         mode_row = ttk.Frame(options)
         mode_row.pack(fill="x")
@@ -382,11 +369,11 @@ class StitchApp(tk.Tk):
         self.run_button = ttk.Button(left, text="开始二维拼接", style="Accent.TButton", command=self._start)
         self.run_button.grid(row=8, column=0, sticky="ew", pady=(10, 0))
 
-        preview = ttk.LabelFrame(page, text="单张截图预览", padding=10)
+        preview = ttk.LabelFrame(page, text="单张截图预览", padding=8)
         preview.grid(row=0, column=1, sticky="nsew")
         preview.rowconfigure(0, weight=1)
         preview.columnconfigure(0, weight=1)
-        self.input_preview_canvas = tk.Canvas(preview, background="#071829", highlightthickness=0)
+        self.input_preview_canvas = tk.Canvas(preview, background="#262626", highlightthickness=0)
         self.input_preview_canvas.grid(row=0, column=0, sticky="nsew")
         ttk.Label(preview, textvariable=self.preview_info, anchor="center").grid(row=1, column=0, sticky="ew", pady=(7, 0))
 
@@ -394,11 +381,11 @@ class StitchApp(tk.Tk):
         page = self.result_page
         page.rowconfigure(0, weight=1)
         page.columnconfigure(0, weight=1)
-        preview = ttk.LabelFrame(page, text="拼接预览", padding=10)
+        preview = ttk.LabelFrame(page, text="拼接预览", padding=8)
         preview.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
         preview.rowconfigure(0, weight=1)
         preview.columnconfigure(0, weight=1)
-        self.canvas = tk.Canvas(preview, background="#071829", highlightthickness=0)
+        self.canvas = tk.Canvas(preview, background="#252525", highlightthickness=0)
         self.canvas.bind("<MouseWheel>", self._zoom_result_preview)
         self.canvas.bind("<Button-4>", lambda event: self._zoom_result_preview(event, 1))
         self.canvas.bind("<Button-5>", lambda event: self._zoom_result_preview(event, -1))
@@ -415,30 +402,40 @@ class StitchApp(tk.Tk):
         ttk.Label(preview, textvariable=self.result_zoom_text, anchor="center").grid(
             row=2, column=0, sticky="ew", pady=(6, 0)
         )
-        side = ttk.Frame(page, width=360, padding=12)
+        side = ttk.Frame(page, width=320)
         side.grid(row=0, column=1, sticky="nsew")
-        side.pack_propagate(False)
-        ttk.Label(side, text="匹配记录", font=("TkDefaultFont", 12, "bold")).pack(anchor="w")
+        side.grid_propagate(False)
+        side.columnconfigure(0, weight=1)
+        side.rowconfigure(1, weight=1)
+        ttk.Label(side, text="匹配记录", font=("TkDefaultFont", 12, "bold")).grid(
+            row=0, column=0, sticky="w"
+        )
+        report_frame = ttk.Frame(side)
+        report_frame.grid(row=1, column=0, sticky="nsew", pady=(6, 8))
+        report_frame.rowconfigure(0, weight=1)
+        report_frame.columnconfigure(0, weight=1)
         self.report = tk.Text(
-            side,
+            report_frame,
             wrap="word",
             state="disabled",
-            background="#eeece7",
-            foreground="#212121",
-            relief="flat",
-            borderwidth=0,
-            padx=10,
-            pady=10,
+            background="#f3f3f3",
+            height=4,
         )
-        self.report.pack(fill="both", expand=True, pady=(6, 10))
+        report_scroll = ttk.Scrollbar(report_frame, orient="vertical", command=self.report.yview)
+        self.report.configure(yscrollcommand=report_scroll.set)
+        self.report.grid(row=0, column=0, sticky="nsew")
+        report_scroll.grid(row=0, column=1, sticky="ns")
+
+        actions = ttk.Frame(side)
+        actions.grid(row=2, column=0, sticky="ew")
         self.crop_button = ttk.Button(
-            side,
+            actions,
             text="矩形裁剪边缘…",
             command=self._toggle_result_crop,
             state="disabled",
         )
         self.crop_button.pack(fill="x", pady=(0, 6))
-        crop_actions = ttk.Frame(side)
+        crop_actions = ttk.Frame(actions)
         crop_actions.pack(fill="x", pady=(0, 6))
         self.apply_crop_button = ttk.Button(
             crop_actions,
@@ -454,21 +451,20 @@ class StitchApp(tk.Tk):
             state="disabled",
         )
         self.undo_crop_button.pack(side="left", fill="x", expand=True, padx=(6, 0))
-        self.save_button = ttk.Button(side, text="保存拼接结果…", style="Accent.TButton", command=self._save, state="disabled")
+        self.save_button = ttk.Button(actions, text="保存拼接结果…", style="Accent.TButton", command=self._save, state="disabled")
         self.save_button.pack(fill="x")
         ttk.Label(
-            side,
+            actions,
             text=(
-                "预览发现缺漏？\n"
-                "可返回“截图管理”补充、移除或替换图片。\n"
-                "然后直接重新拼接，无需清空列表。\n"
-                "出现未对齐时，请核实画布／内容缩放比例。"
+                "预览缺漏可返回截图管理补充后重新拼接，无需清空。\n"
+                "未对齐时请核实画布／内容缩放比例。"
             ),
             foreground="#9a5a00",
             justify="left",
-        ).pack(fill="x", pady=(0, 8))
-        ttk.Button(side, text="返回截图管理", command=lambda: self.notebook.select(self.capture_page)).pack(fill="x", pady=(6, 0))
-        ttk.Button(side, text="清理本轮内容", command=self._remove_all).pack(fill="x", pady=(6, 0))
+            wraplength=300,
+        ).pack(fill="x", pady=(6, 4))
+        ttk.Button(actions, text="返回截图管理", command=lambda: self.notebook.select(self.capture_page)).pack(fill="x", pady=(4, 0))
+        ttk.Button(actions, text="清理本轮内容", command=self._remove_all).pack(fill="x", pady=(6, 0))
 
     # ---------- Thumbnail list ----------
 
