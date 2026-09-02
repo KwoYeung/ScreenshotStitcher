@@ -8,7 +8,7 @@ BUILD_DIR="$PROJECT_ROOT/build/macos"
 DIST_DIR="$PROJECT_ROOT/dist/macos"
 RELEASE_DIR="$PROJECT_ROOT/release/macos"
 APP_NAME="截图自动拼接.app"
-APP_VERSION="1.1.1"
+APP_VERSION="1.2.0"
 ARCH="$(uname -m)"
 DMG_PATH="$RELEASE_DIR/ScreenshotStitcher-v$APP_VERSION-macOS-$ARCH.dmg"
 

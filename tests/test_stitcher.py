@@ -4,7 +4,7 @@ from unittest.mock import patch
 import cv2
 import numpy as np
 
-from stitcher import StitchOptions, match_pair, match_pair_2d, stitch_images, stitch_mosaic
+from stitcher import crop_image, StitchOptions, match_pair, match_pair_2d, stitch_images, stitch_mosaic
 
 
 def make_page(width=620, height=1800):
@@ -72,6 +72,19 @@ class StitcherTests(unittest.TestCase):
         self.assertTrue(match.succeeded, match.reason)
         self.assertAlmostEqual(match.offset_x, 390, delta=3)
         self.assertAlmostEqual(match.offset_y, 260, delta=3)
+
+    def test_rectangular_crop_preserves_alpha_channel(self):
+        image = np.zeros((80, 120, 4), dtype=np.uint8)
+        image[10:70, 20:100] = (40, 80, 120, 180)
+        cropped = crop_image(image, (15, 8, 105, 72))
+        self.assertEqual(cropped.shape, (64, 90, 4))
+        self.assertEqual(int(cropped[2, 5, 3]), 180)
+        self.assertEqual(int(cropped[0, 0, 3]), 0)
+
+    def test_rectangular_crop_rejects_empty_bounds(self):
+        image = np.zeros((20, 30, 4), dtype=np.uint8)
+        with self.assertRaisesRegex(ValueError, "不能为空"):
+            crop_image(image, (10, 10, 10, 18))
 
     def test_unrestricted_2d_match_supports_different_sizes(self):
         canvas = make_canvas(1450, 1100)
@@ -141,6 +154,15 @@ class StitcherTests(unittest.TestCase):
             self.assertAlmostEqual(actual[1], expected[1], delta=3)
         self.assertAlmostEqual(result.image.shape[1], 1080, delta=3)
         self.assertAlmostEqual(result.image.shape[0], 880, delta=3)
+
+    def test_mosaic_uncovered_edges_are_transparent(self):
+        canvas = make_canvas()
+        first = canvas[0:500, 0:600]
+        second = canvas[260:760, 390:990]
+        result = stitch_mosaic([first, second], options=self.options, strict_order=True)
+        self.assertEqual(result.image.shape[2], 4)
+        self.assertEqual(int(result.image[10, 800, 3]), 0)
+        self.assertEqual(int(result.image[300, 450, 3]), 255)
 
     def test_mosaic_stops_at_first_scale_mismatch(self):
         canvas = make_canvas(1450, 1100)

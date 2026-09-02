@@ -87,6 +87,19 @@ def read_image(path: str | Path) -> np.ndarray:
     return image
 
 
+def crop_image(image: np.ndarray, bounds: tuple[int, int, int, int]) -> np.ndarray:
+    """Return a rectangular pixel crop while preserving all image channels."""
+    left, top, right, bottom = bounds
+    height, width = image.shape[:2]
+    left = max(0, min(width, int(left)))
+    right = max(0, min(width, int(right)))
+    top = max(0, min(height, int(top)))
+    bottom = max(0, min(height, int(bottom)))
+    if right <= left or bottom <= top:
+        raise ValueError("裁剪范围不能为空")
+    return np.ascontiguousarray(image[top:bottom, left:right])
+
+
 def write_image(path: str | Path, image: np.ndarray) -> None:
     suffix = Path(path).suffix.lower() or ".png"
     if suffix not in {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}:
@@ -668,7 +681,8 @@ def stitch_mosaic(
     min_y = min(position[1] for _index, position in placed_items)
     max_x = max(position[0] + prepared[index].shape[1] for index, position in placed_items)
     max_y = max(position[1] + prepared[index].shape[0] for index, position in placed_items)
-    canvas = np.full((max_y - min_y, max_x - min_x, 3), 238, dtype=np.uint8)
+    # Keep areas not covered by any screenshot transparent in the PNG result.
+    canvas = np.zeros((max_y - min_y, max_x - min_x, 4), dtype=np.uint8)
     occupied = np.zeros(canvas.shape[:2], dtype=bool)
     for index, position in placed_items:
         image = prepared[index]
@@ -677,7 +691,8 @@ def stitch_mosaic(
         left, top = x - min_x, y - min_y
         roi = canvas[top : top + image_h, left : left + image_w]
         mask = occupied[top : top + image_h, left : left + image_w]
-        roi[~mask] = image[~mask]
+        roi[..., :3][~mask] = image[~mask]
+        roi[..., 3][~mask] = 255
         mask[:] = True
 
     notify("正在生成二维画布预览…")

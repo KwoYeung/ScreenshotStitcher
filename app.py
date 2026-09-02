@@ -41,13 +41,21 @@ from screen_capture import (
     screen_capture_permission_granted,
     show_native_overlay,
 )
-from stitcher import MosaicResult, StitchResult, read_image, stitch_images, stitch_mosaic, write_image
+from stitcher import (
+    MosaicResult,
+    StitchResult,
+    crop_image,
+    read_image,
+    stitch_images,
+    stitch_mosaic,
+    write_image,
+)
 from update_checker import ReleaseInfo, check_latest_release, is_newer_version
 
 
 configure_process_dpi_awareness()
 
-APP_VERSION = "1.1.1"
+APP_VERSION = "1.2.0"
 DEVELOPER_NAME = "KwoYeung"
 
 
@@ -70,6 +78,13 @@ class StitchApp(tk.Tk):
         self.result_preview_min_scale = 0.08
         self.result_preview_max_scale = 4.0
         self.result_zoom_text = tk.StringVar(value="滚轮缩放")
+        self.result_crop_mode = False
+        self.result_crop_start: tuple[float, float] | None = None
+        self.result_crop_bounds: tuple[int, int, int, int] | None = None
+        self.result_crop_rectangle: int | None = None
+        self.result_crop_backup: tuple[
+            np.ndarray, list[tuple[int, int] | None] | None
+        ] | None = None
         self.input_preview_photo: tk.PhotoImage | None = None
         self.thumbnail_photos: list[tk.PhotoImage] = []
         self.thumbnail_meta: dict[str, tuple[int, int]] = {}
@@ -358,6 +373,9 @@ class StitchApp(tk.Tk):
         self.canvas.bind("<MouseWheel>", self._zoom_result_preview)
         self.canvas.bind("<Button-4>", lambda event: self._zoom_result_preview(event, 1))
         self.canvas.bind("<Button-5>", lambda event: self._zoom_result_preview(event, -1))
+        self.canvas.bind("<ButtonPress-1>", self._result_crop_begin)
+        self.canvas.bind("<B1-Motion>", self._result_crop_move)
+        self.canvas.bind("<ButtonRelease-1>", self._result_crop_finish)
         vertical = ttk.Scrollbar(preview, orient="vertical", command=self.canvas.yview)
         horizontal = ttk.Scrollbar(preview, orient="horizontal", command=self.canvas.xview)
         self.canvas.configure(yscrollcommand=vertical.set, xscrollcommand=horizontal.set)
@@ -373,6 +391,29 @@ class StitchApp(tk.Tk):
         ttk.Label(side, text="匹配记录", font=("TkDefaultFont", 12, "bold")).pack(anchor="w")
         self.report = tk.Text(side, wrap="word", state="disabled", background="#f3f3f3")
         self.report.pack(fill="both", expand=True, pady=(6, 10))
+        self.crop_button = ttk.Button(
+            side,
+            text="矩形裁剪边缘…",
+            command=self._toggle_result_crop,
+            state="disabled",
+        )
+        self.crop_button.pack(fill="x", pady=(0, 6))
+        crop_actions = ttk.Frame(side)
+        crop_actions.pack(fill="x", pady=(0, 6))
+        self.apply_crop_button = ttk.Button(
+            crop_actions,
+            text="应用裁剪",
+            command=self._apply_result_crop,
+            state="disabled",
+        )
+        self.apply_crop_button.pack(side="left", fill="x", expand=True)
+        self.undo_crop_button = ttk.Button(
+            crop_actions,
+            text="撤销上次裁剪",
+            command=self._undo_result_crop,
+            state="disabled",
+        )
+        self.undo_crop_button.pack(side="left", fill="x", expand=True, padx=(6, 0))
         self.save_button = ttk.Button(side, text="保存拼接结果…", style="Accent.TButton", command=self._save, state="disabled")
         self.save_button.pack(fill="x")
         ttk.Label(
@@ -527,6 +568,7 @@ class StitchApp(tk.Tk):
         self.report.delete("1.0", tk.END)
         self.report.configure(state="disabled")
         self.save_button.configure(state="disabled")
+        self._reset_result_crop(clear_backup=True)
 
     def _move(self, step: int) -> None:
         selected = self._selected_indices()
@@ -1138,8 +1180,11 @@ class StitchApp(tk.Tk):
         if len(self.paths) < 2:
             messagebox.showinfo("需要更多图片", "请至少选择两张截图。")
             return
+        self._reset_result_crop(clear_backup=False)
         self.run_button.configure(state="disabled")
         self.save_button.configure(state="disabled")
+        self.crop_button.configure(state="disabled")
+        self.undo_crop_button.configure(state="disabled")
         self.status.set("正在读取图片…")
         threading.Thread(
             target=self._worker,
@@ -1177,6 +1222,8 @@ class StitchApp(tk.Tk):
                     self._show_update_available(payload)  # type: ignore[arg-type]
                 elif kind == "error":
                     self.run_button.configure(state="normal")
+                    self.save_button.configure(state="normal" if self.result is not None else "disabled")
+                    self._reset_result_crop(clear_backup=False)
                     self.status.set("拼接失败")
                     messagebox.showerror("拼接失败", str(payload))
                 elif kind == "done":
@@ -1187,9 +1234,20 @@ class StitchApp(tk.Tk):
 
     def _show_result(self, result: StitchResult | MosaicResult) -> None:
         self.result = result
+        self._reset_result_crop(clear_backup=True)
         self.run_button.configure(state="normal")
         self.save_button.configure(state="normal")
+        self.crop_button.configure(state="normal")
         self.status.set(f"完成：{result.image.shape[1]} × {result.image.shape[0]} 像素；{len(result.warnings)} 个警告")
+        self._refresh_result_report()
+
+        self.notebook.select(self.result_page)
+        self._fit_result_preview()
+
+    def _refresh_result_report(self) -> None:
+        if self.result is None:
+            return
+        result = self.result
         if isinstance(result, MosaicResult):
             placed_positions = [
                 f"{i + 1}=({position[0]}, {position[1]})"
@@ -1211,11 +1269,13 @@ class StitchApp(tk.Tk):
         self.report.insert("1.0", "\n".join(lines))
         self.report.configure(state="disabled")
 
-        self.notebook.select(self.result_page)
+    def _fit_result_preview(self) -> None:
+        if self.result is None:
+            return
         self.update_idletasks()
         max_width = max(360, self.canvas.winfo_width() - 28)
-        scale = min(1.0, max_width / result.image.shape[1])
-        pixels = max(1, result.image.shape[0] * result.image.shape[1])
+        scale = min(1.0, max_width / self.result.image.shape[1])
+        pixels = max(1, self.result.image.shape[0] * self.result.image.shape[1])
         self.result_preview_scale = scale
         self.result_preview_min_scale = max(0.01, min(0.08, scale * 0.5))
         self.result_preview_max_scale = max(scale, min(4.0, (45_000_000 / pixels) ** 0.5))
@@ -1239,6 +1299,153 @@ class StitchApp(tk.Tk):
             self.canvas.configure(scrollregion=(0, 0, shown.shape[1], shown.shape[0]))
             self.result_preview_scale = scale
             self.result_zoom_text.set(f"滚轮缩放：{scale:.0%}  ·  拖动滚动条查看画布")
+            self._draw_result_crop()
+
+    def _result_crop_point(self, event: tk.Event) -> tuple[float, float]:
+        if self.result is None:
+            return 0.0, 0.0
+        scale = max(self.result_preview_scale, 1e-6)
+        x = self.canvas.canvasx(event.x) / scale
+        y = self.canvas.canvasy(event.y) / scale
+        return (
+            float(np.clip(x, 0, self.result.image.shape[1])),
+            float(np.clip(y, 0, self.result.image.shape[0])),
+        )
+
+    def _toggle_result_crop(self) -> None:
+        if self.result is None:
+            return
+        if self.result_crop_mode:
+            self._reset_result_crop(clear_backup=False)
+            self.status.set("已取消裁剪框选")
+            return
+        self.result_crop_mode = True
+        self.result_crop_start = None
+        self.result_crop_bounds = None
+        self.canvas.configure(cursor="crosshair")
+        self.crop_button.configure(text="取消框选")
+        self.apply_crop_button.configure(state="disabled")
+        self.status.set("请在拼接预览上拖动鼠标，框选需要保留的矩形范围")
+
+    def _result_crop_begin(self, event: tk.Event) -> str | None:
+        if not self.result_crop_mode or self.result is None:
+            return None
+        self.result_crop_start = self._result_crop_point(event)
+        self.result_crop_bounds = None
+        self.apply_crop_button.configure(state="disabled")
+        if self.result_crop_rectangle is not None:
+            self.canvas.delete(self.result_crop_rectangle)
+            self.result_crop_rectangle = None
+        return "break"
+
+    def _result_crop_move(self, event: tk.Event) -> str | None:
+        if not self.result_crop_mode or self.result_crop_start is None:
+            return None
+        x0, y0 = self.result_crop_start
+        x1, y1 = self._result_crop_point(event)
+        scale = self.result_preview_scale
+        coordinates = (x0 * scale, y0 * scale, x1 * scale, y1 * scale)
+        if self.result_crop_rectangle is None:
+            self.result_crop_rectangle = self.canvas.create_rectangle(
+                *coordinates,
+                outline="#00a8ff",
+                width=2,
+                dash=(7, 4),
+            )
+        else:
+            self.canvas.coords(self.result_crop_rectangle, *coordinates)
+        return "break"
+
+    def _result_crop_finish(self, event: tk.Event) -> str | None:
+        if not self.result_crop_mode or self.result_crop_start is None or self.result is None:
+            return None
+        x0, y0 = self.result_crop_start
+        x1, y1 = self._result_crop_point(event)
+        left = max(0, int(np.floor(min(x0, x1))))
+        top = max(0, int(np.floor(min(y0, y1))))
+        right = min(self.result.image.shape[1], int(np.ceil(max(x0, x1))))
+        bottom = min(self.result.image.shape[0], int(np.ceil(max(y0, y1))))
+        self.result_crop_start = None
+        if right - left < 2 or bottom - top < 2:
+            self.result_crop_bounds = None
+            self.apply_crop_button.configure(state="disabled")
+            self.status.set("裁剪范围太小，请重新拖动框选")
+            return "break"
+        self.result_crop_bounds = (left, top, right, bottom)
+        self.apply_crop_button.configure(state="normal")
+        self._draw_result_crop()
+        self.status.set(f"已框选 {right - left} × {bottom - top} 像素；点击“应用裁剪”确认")
+        return "break"
+
+    def _draw_result_crop(self) -> None:
+        if self.result_crop_rectangle is not None:
+            self.canvas.delete(self.result_crop_rectangle)
+            self.result_crop_rectangle = None
+        if self.result_crop_bounds is None:
+            return
+        left, top, right, bottom = self.result_crop_bounds
+        scale = self.result_preview_scale
+        self.result_crop_rectangle = self.canvas.create_rectangle(
+            left * scale,
+            top * scale,
+            right * scale,
+            bottom * scale,
+            outline="#00a8ff",
+            width=2,
+            dash=(7, 4),
+        )
+
+    def _reset_result_crop(self, clear_backup: bool) -> None:
+        self.result_crop_mode = False
+        self.result_crop_start = None
+        self.result_crop_bounds = None
+        if self.result_crop_rectangle is not None:
+            self.canvas.delete(self.result_crop_rectangle)
+            self.result_crop_rectangle = None
+        if clear_backup:
+            self.result_crop_backup = None
+        self.canvas.configure(cursor="")
+        self.crop_button.configure(
+            text="矩形裁剪边缘…",
+            state="normal" if self.result is not None else "disabled",
+        )
+        self.apply_crop_button.configure(state="disabled")
+        self.undo_crop_button.configure(
+            state="normal" if self.result_crop_backup is not None else "disabled"
+        )
+
+    def _apply_result_crop(self) -> None:
+        if self.result is None or self.result_crop_bounds is None:
+            return
+        left, top, right, bottom = self.result_crop_bounds
+        old_positions = self.result.positions.copy() if isinstance(self.result, MosaicResult) else None
+        self.result_crop_backup = (self.result.image, old_positions)
+        self.result.image = crop_image(self.result.image, self.result_crop_bounds)
+        if isinstance(self.result, MosaicResult):
+            self.result.positions = [
+                (position[0] - left, position[1] - top) if position is not None else None
+                for position in self.result.positions
+            ]
+        self._reset_result_crop(clear_backup=False)
+        self._refresh_result_report()
+        self._fit_result_preview()
+        self.status.set(
+            f"已裁剪为 {right - left} × {bottom - top} 像素；"
+            "PNG 透明区域保持不变"
+        )
+
+    def _undo_result_crop(self) -> None:
+        if self.result is None or self.result_crop_backup is None:
+            return
+        image, positions = self.result_crop_backup
+        self.result.image = image
+        if isinstance(self.result, MosaicResult) and positions is not None:
+            self.result.positions = positions
+        self.result_crop_backup = None
+        self._reset_result_crop(clear_backup=False)
+        self._refresh_result_report()
+        self._fit_result_preview()
+        self.status.set(f"已撤销裁剪，恢复为 {image.shape[1]} × {image.shape[0]} 像素")
 
     def _zoom_result_preview(self, event: tk.Event, direction: int | None = None) -> str:
         if self.result is None:

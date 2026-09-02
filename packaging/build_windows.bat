@@ -2,7 +2,7 @@
 setlocal
 cd /d "%~dp0\.."
 
-set "APP_VERSION=1.1.1"
+set "APP_VERSION=1.2.0"
 set "BUILD_VENV=.venv-build-windows"
 set "BUILD_DIR=build\windows"
 set "DIST_DIR=release\windows"
