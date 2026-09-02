@@ -163,154 +163,54 @@ class StitchApp(tk.Tk):
 
     def _build_ui(self) -> None:
         style = ttk.Style(self)
-        if "clam" in style.theme_names():
-            style.theme_use("clam")
-        ui_font = "Helvetica Neue" if sys.platform == "darwin" else "Segoe UI"
-        self.configure(background="#ffffff")
-        style.configure(".", font=(ui_font, 11), background="#ffffff", foreground="#212121")
-        style.configure("App.TFrame", background="#ffffff")
-        style.configure("Page.TFrame", background="#eeece7")
-        style.configure("Card.TFrame", background="#ffffff", relief="solid", borderwidth=1)
-        style.configure("Header.TFrame", background="#003c33")
-        style.configure(
-            "HeaderTitle.TLabel",
-            background="#003c33",
-            foreground="#ffffff",
-            font=(ui_font, 20),
-        )
-        style.configure("HeaderMeta.TLabel", background="#003c33", foreground="#d9eee9")
-        style.configure("Section.TLabel", font=(ui_font, 12, "bold"), foreground="#212121")
-        style.configure("Muted.TLabel", foreground="#75758a")
-        style.configure(
-            "TButton",
-            background="#ffffff",
-            foreground="#212121",
-            bordercolor="#d9d9dd",
-            lightcolor="#ffffff",
-            darkcolor="#ffffff",
-            relief="flat",
-            padding=(12, 8),
-        )
-        style.map(
-            "TButton",
-            background=[("active", "#eeece7"), ("disabled", "#f5f5f5")],
-            foreground=[("disabled", "#93939f")],
-            bordercolor=[("focus", "#4c6ee6"), ("active", "#93939f")],
-        )
-        style.configure(
-            "Accent.TButton",
-            font=(ui_font, 11, "bold"),
-            background="#17171c",
-            foreground="#ffffff",
-            bordercolor="#17171c",
-            lightcolor="#17171c",
-            darkcolor="#17171c",
-            padding=(16, 10),
-        )
-        style.map(
-            "Accent.TButton",
-            background=[("active", "#003c33"), ("disabled", "#d9d9dd")],
-            foreground=[("disabled", "#75758a")],
-            bordercolor=[("focus", "#4c6ee6")],
-        )
-        style.configure(
-            "Header.TButton",
-            background="#003c33",
-            foreground="#ffffff",
-            bordercolor="#7aa69e",
-            lightcolor="#003c33",
-            darkcolor="#003c33",
-            padding=(12, 7),
-        )
-        style.map("Header.TButton", background=[("active", "#075348")])
-        style.configure(
-            "Card.TLabelframe",
-            background="#ffffff",
-            bordercolor="#d9d9dd",
-            lightcolor="#ffffff",
-            darkcolor="#ffffff",
-            relief="solid",
-            borderwidth=1,
-        )
-        style.configure(
-            "Card.TLabelframe.Label",
-            background="#ffffff",
-            foreground="#212121",
-            font=(ui_font, 11, "bold"),
-        )
-        style.configure(
-            "App.TNotebook",
-            background="#eeece7",
-            borderwidth=0,
-            tabmargins=(0, 8, 0, 0),
-        )
-        style.configure(
-            "App.TNotebook.Tab",
-            background="#eeece7",
-            foreground="#616161",
-            padding=(18, 10),
-            borderwidth=0,
-        )
-        style.map(
-            "App.TNotebook.Tab",
-            background=[("selected", "#ffffff"), ("active", "#f7f6f3")],
-            foreground=[("selected", "#003c33")],
-        )
-        style.configure(
-            "Image.Treeview",
-            rowheight=84,
-            background="#ffffff",
-            fieldbackground="#ffffff",
-            bordercolor="#d9d9dd",
-        )
-        style.map(
-            "Image.Treeview",
-            background=[("selected", "#dceee9")],
-            foreground=[("selected", "#212121")],
-        )
-        style.configure(
-            "Treeview.Heading",
-            background="#eeece7",
-            foreground="#212121",
-            relief="flat",
-        )
-
-        root = ttk.Frame(self, style="App.TFrame")
+        # Keep each platform's native theme: Aqua on macOS and native Windows
+        # controls. This preserves rounded buttons, focus rings, and system fonts.
+        style.configure("Accent.TButton", font=("TkDefaultFont", 11, "bold"), padding=(14, 8))
+        style.configure("Image.Treeview", rowheight=84)
+        root = ttk.Frame(self)
         root.pack(fill="both", expand=True)
         root.rowconfigure(1, weight=1)
         root.columnconfigure(0, weight=1)
-        header = ttk.Frame(root, style="Header.TFrame", padding=(18, 14))
+        header = tk.Frame(root, background="#003c33", padx=18, pady=12)
         header.grid(row=0, column=0, sticky="ew")
-        ttk.Label(header, text="截图自动拼接", style="HeaderTitle.TLabel").pack(side="left")
-        ttk.Label(header, text="SCREENSHOT STITCHER", style="HeaderMeta.TLabel").pack(
+        tk.Label(
+            header,
+            text="截图自动拼接",
+            background="#003c33",
+            foreground="#ffffff",
+            font=("TkDefaultFont", 19, "bold"),
+        ).pack(side="left")
+        tk.Label(
+            header,
+            text="SCREENSHOT STITCHER",
+            background="#003c33",
+            foreground="#d9eee9",
+            font=("TkDefaultFont", 9),
+        ).pack(
             side="left", padx=(14, 0), pady=(5, 0)
         )
-        ttk.Button(header, text="关于", style="Header.TButton", command=self._show_about).pack(
-            side="right"
-        )
+        ttk.Button(header, text="关于", command=self._show_about).pack(side="right")
         if sys.platform == "darwin":
             ttk.Button(
                 header,
                 text="重置截图权限",
-                style="Header.TButton",
                 command=self._confirm_repair_capture_permission,
             ).pack(side="right", padx=(0, 8))
 
-        self.notebook = ttk.Notebook(root, style="App.TNotebook")
+        self.notebook = ttk.Notebook(root)
         self.notebook.grid(row=1, column=0, sticky="nsew")
-        self.capture_page = ttk.Frame(self.notebook, padding=14, style="Page.TFrame")
-        self.result_page = ttk.Frame(self.notebook, padding=14, style="Page.TFrame")
+        self.capture_page = ttk.Frame(self.notebook, padding=12)
+        self.result_page = ttk.Frame(self.notebook, padding=12)
         self.notebook.add(self.capture_page, text="① 截图管理")
         self.notebook.add(self.result_page, text="② 拼接结果")
         self._build_capture_page()
         self._build_result_page()
-        footer = ttk.Frame(root, style="App.TFrame", padding=(16, 10))
+        footer = ttk.Frame(root, padding=(14, 8))
         footer.grid(row=2, column=0, sticky="ew")
         self.version_label = tk.Label(
             footer,
             textvariable=self.version_status,
             foreground="#6e6e73",
-            background="#ffffff",
             cursor="arrow",
             borderwidth=0,
             padx=0,
@@ -319,10 +219,10 @@ class StitchApp(tk.Tk):
         self.version_label.pack(side="left")
         self.version_label.bind("<Button-1>", self._open_update_release)
         ttk.Separator(footer, orient="vertical").pack(side="left", fill="y", padx=9)
-        ttk.Label(footer, textvariable=self.status, anchor="w", style="Muted.TLabel").pack(
+        ttk.Label(footer, textvariable=self.status, anchor="w", foreground="#6e6e73").pack(
             side="left", fill="x", expand=True
         )
-        ttk.Label(footer, text=f"© 2026 {DEVELOPER_NAME}", style="Muted.TLabel").pack(
+        ttk.Label(footer, text=f"© 2026 {DEVELOPER_NAME}", foreground="#6e6e73").pack(
             side="right", padx=(12, 0)
         )
 
@@ -356,7 +256,7 @@ class StitchApp(tk.Tk):
         page = self.capture_page
         page.rowconfigure(0, weight=1)
         page.columnconfigure(1, weight=1)
-        left = ttk.Frame(page, width=455, padding=14, style="Card.TFrame")
+        left = ttk.Frame(page, width=455, padding=12)
         left.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
         left.grid_propagate(False)
         left.columnconfigure(0, weight=1)
@@ -399,7 +299,7 @@ class StitchApp(tk.Tk):
             row=3, column=0, sticky="w", pady=(2, 8)
         )
 
-        ttk.Label(left, text="截图列表（支持多选）", style="Section.TLabel").grid(
+        ttk.Label(left, text="截图列表（支持多选）", font=("TkDefaultFont", 11, "bold")).grid(
             row=4, column=0, sticky="w"
         )
         tree_frame = ttk.Frame(left)
@@ -428,7 +328,7 @@ class StitchApp(tk.Tk):
         ttk.Button(edit_row, text="移除选中", command=self._remove).pack(side="left", fill="x", expand=True)
         ttk.Button(edit_row, text="全部清理", command=self._remove_all).pack(side="left", fill="x", expand=True, padx=(6, 0))
 
-        options = ttk.LabelFrame(left, text="拼接设置", padding=10, style="Card.TLabelframe")
+        options = ttk.LabelFrame(left, text="拼接设置", padding=10)
         options.grid(row=7, column=0, sticky="ew", pady=(10, 0))
         mode_row = ttk.Frame(options)
         mode_row.pack(fill="x")
@@ -482,7 +382,7 @@ class StitchApp(tk.Tk):
         self.run_button = ttk.Button(left, text="开始二维拼接", style="Accent.TButton", command=self._start)
         self.run_button.grid(row=8, column=0, sticky="ew", pady=(10, 0))
 
-        preview = ttk.LabelFrame(page, text="单张截图预览", padding=10, style="Card.TLabelframe")
+        preview = ttk.LabelFrame(page, text="单张截图预览", padding=10)
         preview.grid(row=0, column=1, sticky="nsew")
         preview.rowconfigure(0, weight=1)
         preview.columnconfigure(0, weight=1)
@@ -494,7 +394,7 @@ class StitchApp(tk.Tk):
         page = self.result_page
         page.rowconfigure(0, weight=1)
         page.columnconfigure(0, weight=1)
-        preview = ttk.LabelFrame(page, text="拼接预览", padding=10, style="Card.TLabelframe")
+        preview = ttk.LabelFrame(page, text="拼接预览", padding=10)
         preview.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
         preview.rowconfigure(0, weight=1)
         preview.columnconfigure(0, weight=1)
@@ -515,10 +415,10 @@ class StitchApp(tk.Tk):
         ttk.Label(preview, textvariable=self.result_zoom_text, anchor="center").grid(
             row=2, column=0, sticky="ew", pady=(6, 0)
         )
-        side = ttk.Frame(page, width=360, padding=14, style="Card.TFrame")
+        side = ttk.Frame(page, width=360, padding=12)
         side.grid(row=0, column=1, sticky="nsew")
         side.pack_propagate(False)
-        ttk.Label(side, text="匹配记录", style="Section.TLabel").pack(anchor="w")
+        ttk.Label(side, text="匹配记录", font=("TkDefaultFont", 12, "bold")).pack(anchor="w")
         self.report = tk.Text(
             side,
             wrap="word",
